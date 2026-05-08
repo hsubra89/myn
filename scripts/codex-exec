@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 git_root="$(git -C "$script_dir" rev-parse --show-toplevel)"
-remote_file="${CODEX_REMOTE_FILE:-$script_dir/remote-server.md}"
+remote_file="${CODEX_REMOTE_FILE:-$script_dir/remote-ssh.txt}"
 repo_name="$(basename "$git_root")"
 remote_dir="${CODEX_REMOTE_DIR:-}"
 remote_shell="${CODEX_REMOTE_SHELL:-}"
@@ -13,7 +13,7 @@ usage() {
   cat <<'USAGE'
 Usage: codex_exec <prompt>
 
-Starts `codex exec` on the SSH host listed in remote-server.md inside a
+Starts `codex exec` on the SSH host listed in remote-ssh.txt inside a
 detached remote tmux session. The local command returns after Codex launches.
 
 Environment:

@@ -4,7 +4,7 @@ set -euo pipefail
 command_name="codex-teleport"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 git_root="$(git -C "$script_dir" rev-parse --show-toplevel)"
-remote_file="${CODEX_REMOTE_FILE:-$script_dir/remote-server.md}"
+remote_file="${CODEX_REMOTE_FILE:-$script_dir/remote-ssh.txt}"
 repo_name="$(basename "$git_root")"
 remote_dir="${CODEX_REMOTE_DIR:-}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
@@ -19,7 +19,7 @@ usage() {
 Usage: codex-teleport [--thread THREAD_ID | THREAD_ID] [--last] [--dry-run]
 
 Copies a local Codex conversation rollout to the SSH host listed in
-remote-server.md. Defaults THREAD_ID to CODEX_THREAD_ID, which Codex exposes
+remote-ssh.txt. Defaults THREAD_ID to CODEX_THREAD_ID, which Codex exposes
 inside an active conversation.
 
 Before copying, validates that the local checkout is clean and the remote
