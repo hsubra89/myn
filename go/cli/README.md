@@ -2,6 +2,18 @@
 
 A small Cobra-based Go CLI under `go/cli`.
 
+## Development
+
+Common development commands are defined in [`justfile`](justfile):
+
+```sh
+just run version
+just fmt
+just test
+just build
+just tidy
+```
+
 ## Run
 
 ```sh
@@ -78,18 +90,34 @@ Set `HCLOUD_ENDPOINT` to override the validation endpoint.
 ## Test
 
 ```sh
+just test
+# or
 go test ./...
+```
+
+## Format
+
+```sh
+just fmt
+# or
+go fmt ./...
 ```
 
 ## Build
 
 ```sh
+just build
+# or
+mkdir -p ./bin
 go build -o ./bin/me ./cmd/me
 ```
 
 ## Release Metadata
 
 ```sh
+just release 0.1.0
+# or
+mkdir -p ./bin
 go build \
   -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o ./bin/me ./cmd/me
