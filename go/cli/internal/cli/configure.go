@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ type configureOptions struct {
 }
 
 type configureDeps struct {
+	ctx                       context.Context
 	appConfigPath             func() (string, error)
 	userHomeDir               func() (string, error)
 	workingDir                func() (string, error)
@@ -64,7 +66,9 @@ func newConfigureCommand() *cobra.Command {
 			opts.localRootSet = cmd.Flags().Changed("local-root")
 			opts.remoteRootSet = cmd.Flags().Changed("remote-root")
 			opts.sshIdentityFileSet = cmd.Flags().Changed("ssh-identity-file")
-			return runConfigure(cmd.OutOrStdout(), opts, defaultConfigureDeps())
+			deps := defaultConfigureDeps()
+			deps.ctx = cmd.Context()
+			return runConfigure(cmd.OutOrStdout(), opts, deps)
 		},
 	}
 
@@ -178,7 +182,7 @@ func runConfigure(out io.Writer, opts configureOptions, deps configureDeps) erro
 	} else {
 		fmt.Fprintln(out, "SSH identity: not configured")
 	}
-	if personalServerErr := deps.personalServerProvisioner.Configure(out, appConfigPath, cfg, deps.prompter); personalServerErr != nil && sshErr == nil {
+	if personalServerErr := deps.personalServerProvisioner.Configure(deps.ctx, out, appConfigPath, cfg, deps.prompter); personalServerErr != nil && sshErr == nil {
 		return personalServerErr
 	}
 	return sshErr
@@ -407,6 +411,9 @@ func nonEmptyMessages(messages ...string) []string {
 }
 
 func fillConfigureDeps(deps configureDeps) configureDeps {
+	if deps.ctx == nil {
+		deps.ctx = context.Background()
+	}
 	if deps.appConfigPath == nil {
 		env := os.Getenv
 		deps.appConfigPath = func() (string, error) {

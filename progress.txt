@@ -55,3 +55,11 @@
 - Reported hard bootstrap failures and timeouts while preserving the saved Personal Server Configuration and printing inspection SSH commands.
 - Printed user and root SSH commands over IPv4 and IPv6, IPv4 first, with `-i` pointing at the configured SSH identity.
 - Verified with `go test ./...` and `go vet ./...` from `go/cli`.
+
+2026-05-10 - Completed Issue 8: Harden failure handling and cancellation.
+
+- Threaded command cancellation through the Personal Server provisioning path so Hetzner API calls, action waiting, root SSH polling, and bootstrap marker polling receive the command context.
+- Preserved Personal Server Configuration when cancellation happens after Hetzner accepts server creation, while still leaving supporting resources unmanaged on cancellation or failure.
+- Kept cancellation before server creation from saving Personal Server Configuration.
+- Verified unavailable pricing still reports `Maximum monthly price: unavailable` and allows confirmed creation to proceed.
+- Verified with `go test ./...` and `go vet ./...` from `go/cli`.

@@ -573,12 +573,20 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 		serverTypes: []personalServerType{
 			fakePersonalServerType("cx32", "shared", "x86", false, 4, 8, 80, "local", "ash", true, false, "not-a-price"),
 		},
+		images: []personalServerImage{
+			{Name: "ubuntu-24.04", Type: "system", Status: "available", OSFlavor: "ubuntu", OSVersion: "24.04", Architecture: "x86"},
+		},
+		createdServer: personalServerCloudServer{
+			ID:   654321,
+			IPv4: "203.0.113.55",
+			IPv6: "2001:db8::55",
+		},
 	}
 	prompter := &fakeConfigurePrompter{
 		canPrompt: true,
 		inputs:    []string{"harish", "harish-personal-server"},
 		passwords: []string{"server-secret", "server-secret"},
-		confirms:  []bool{false},
+		confirms:  []bool{true},
 	}
 
 	var out bytes.Buffer
@@ -602,6 +610,10 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+			runSSH: newSuccessfulPersonalServerSSHRunner().Run,
 			currentUsername: func() string {
 				return "harish"
 			},
@@ -612,6 +624,9 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 
 	if !strings.Contains(out.String(), "Maximum monthly price: unavailable") {
 		t.Fatalf("expected unavailable pricing output, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Personal Server created: server 654321.") {
+		t.Fatalf("expected unavailable pricing to still permit creation, got %q", out.String())
 	}
 }
 
@@ -1123,6 +1138,286 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
+	}
+}
+
+func TestRunConfigureCancellationBeforeServerCreationDoesNotSavePersonalServer(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cloud := successfulPersonalServerCloudClient()
+	cloud.failOnCanceledContext = true
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		ctx: ctx,
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if len(cloud.contexts) == 0 {
+		t.Fatal("expected Hetzner calls to receive command context")
+	}
+	if cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("cancellation before creation should not create a server, got request %#v", cloud.serverCreateRequest)
+	}
+
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.PersonalServer.isZero() {
+		t.Fatalf("cancellation before creation should not save Personal Server Configuration, got %#v", cfg.PersonalServer)
+	}
+}
+
+func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cloud := successfulPersonalServerCloudClient()
+	cloud.failOnCanceledContext = true
+	cloud.cancelAfterCreateServer = cancel
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		ctx: ctx,
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true},
+		},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+			currentUsername: func() string {
+				return "harish"
+			},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if cloud.serverCreateRequest.Name == "" {
+		t.Fatal("expected cancellation to happen after server creation")
+	}
+	if cloud.createdFirewall.ID == 0 || cloud.createdSSHKey.ID == 0 {
+		t.Fatalf("supporting resources should be left in place on cancellation, got firewall=%#v sshKey=%#v", cloud.createdFirewall, cloud.createdSSHKey)
+	}
+
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+		t.Fatalf("cancellation after creation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
+	}
+}
+
+func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sshCalls := 0
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		ctx: ctx,
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true},
+		},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return successfulPersonalServerCloudClient()
+			},
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+			runSSH: func(context.Context, string, string, string, string) (string, error) {
+				sshCalls++
+				cancel()
+				return "", errors.New("connection refused")
+			},
+			currentUsername: func() string {
+				return "harish"
+			},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if sshCalls != 1 {
+		t.Fatalf("expected one root SSH attempt before cancellation, got %d", sshCalls)
+	}
+
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+		t.Fatalf("root SSH cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
+	}
+}
+
+func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServer(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sshCalls := 0
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		ctx: ctx,
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true},
+		},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return successfulPersonalServerCloudClient()
+			},
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+			runSSH: func(_ context.Context, _ string, _ string, _ string, command string) (string, error) {
+				sshCalls++
+				if command == "true" {
+					return "ready\n", nil
+				}
+				cancel()
+				return "", errors.New("marker not ready")
+			},
+			currentUsername: func() string {
+				return "harish"
+			},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if sshCalls != 2 {
+		t.Fatalf("expected root SSH and one marker poll before cancellation, got %d", sshCalls)
+	}
+
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+		t.Fatalf("marker polling cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
 	}
 }
 
@@ -1745,24 +2040,27 @@ func TestRunConfigureVerifiesPersonalServerWithHetznerEndpointOverride(t *testin
 }
 
 type fakePersonalServerCloudClient struct {
-	servers              map[int]personalServerCloudServer
-	serversByName        map[string]personalServerCloudServer
-	serverIDs            []int
-	serverNames          []string
-	locations            []personalServerLocation
-	serverTypes          []personalServerType
-	images               []personalServerImage
-	firewallsByName      map[string]personalServerFirewall
-	createdFirewall      personalServerFirewall
-	sshKeysByFingerprint map[string]personalServerSSHKey
-	sshKeyFingerprints   []string
-	createdSSHKey        personalServerSSHKey
-	serverCreateRequest  personalServerCreateServerRequest
-	createdServer        personalServerCloudServer
-	waitedActions        bool
-	waitedActionIDs      []int
-	listLocations        int
-	listServerTypes      int
+	servers                 map[int]personalServerCloudServer
+	serversByName           map[string]personalServerCloudServer
+	serverIDs               []int
+	serverNames             []string
+	contexts                []context.Context
+	failOnCanceledContext   bool
+	locations               []personalServerLocation
+	serverTypes             []personalServerType
+	images                  []personalServerImage
+	firewallsByName         map[string]personalServerFirewall
+	createdFirewall         personalServerFirewall
+	sshKeysByFingerprint    map[string]personalServerSSHKey
+	sshKeyFingerprints      []string
+	createdSSHKey           personalServerSSHKey
+	serverCreateRequest     personalServerCreateServerRequest
+	createdServer           personalServerCloudServer
+	cancelAfterCreateServer func()
+	waitedActions           bool
+	waitedActionIDs         []int
+	listLocations           int
+	listServerTypes         int
 }
 
 func successfulPersonalServerCloudClient() *fakePersonalServerCloudClient {
@@ -1826,38 +2124,69 @@ func (r *fakePersonalServerSSHRunner) Run(_ context.Context, identityFile string
 	return output, nil
 }
 
-func (c *fakePersonalServerCloudClient) ServerByID(_ context.Context, id int) (personalServerCloudServer, bool, error) {
+func (c *fakePersonalServerCloudClient) recordContext(ctx context.Context) error {
+	c.contexts = append(c.contexts, ctx)
+	if c.failOnCanceledContext {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *fakePersonalServerCloudClient) ServerByID(ctx context.Context, id int) (personalServerCloudServer, bool, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerCloudServer{}, false, err
+	}
 	c.serverIDs = append(c.serverIDs, id)
 	server, ok := c.servers[id]
 	return server, ok, nil
 }
 
-func (c *fakePersonalServerCloudClient) ServerByName(_ context.Context, name string) (personalServerCloudServer, bool, error) {
+func (c *fakePersonalServerCloudClient) ServerByName(ctx context.Context, name string) (personalServerCloudServer, bool, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerCloudServer{}, false, err
+	}
 	c.serverNames = append(c.serverNames, name)
 	server, ok := c.serversByName[name]
 	return server, ok, nil
 }
 
-func (c *fakePersonalServerCloudClient) Locations(context.Context) ([]personalServerLocation, error) {
+func (c *fakePersonalServerCloudClient) Locations(ctx context.Context) ([]personalServerLocation, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return nil, err
+	}
 	c.listLocations++
 	return c.locations, nil
 }
 
-func (c *fakePersonalServerCloudClient) ServerTypes(context.Context) ([]personalServerType, error) {
+func (c *fakePersonalServerCloudClient) ServerTypes(ctx context.Context) ([]personalServerType, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return nil, err
+	}
 	c.listServerTypes++
 	return c.serverTypes, nil
 }
 
-func (c *fakePersonalServerCloudClient) Images(context.Context) ([]personalServerImage, error) {
+func (c *fakePersonalServerCloudClient) Images(ctx context.Context) ([]personalServerImage, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return nil, err
+	}
 	return c.images, nil
 }
 
-func (c *fakePersonalServerCloudClient) FirewallByName(_ context.Context, name string) (personalServerFirewall, bool, error) {
+func (c *fakePersonalServerCloudClient) FirewallByName(ctx context.Context, name string) (personalServerFirewall, bool, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerFirewall{}, false, err
+	}
 	firewall, ok := c.firewallsByName[name]
 	return firewall, ok, nil
 }
 
-func (c *fakePersonalServerCloudClient) CreateFirewall(_ context.Context, firewall personalServerFirewall) (personalServerFirewall, []personalServerAction, error) {
+func (c *fakePersonalServerCloudClient) CreateFirewall(ctx context.Context, firewall personalServerFirewall) (personalServerFirewall, []personalServerAction, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerFirewall{}, nil, err
+	}
 	if firewall.ID == 0 {
 		firewall.ID = 2001
 	}
@@ -1865,13 +2194,19 @@ func (c *fakePersonalServerCloudClient) CreateFirewall(_ context.Context, firewa
 	return firewall, nil, nil
 }
 
-func (c *fakePersonalServerCloudClient) SSHKeyByFingerprint(_ context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
+func (c *fakePersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerSSHKey{}, false, err
+	}
 	c.sshKeyFingerprints = append(c.sshKeyFingerprints, fingerprint)
 	sshKey, ok := c.sshKeysByFingerprint[fingerprint]
 	return sshKey, ok, nil
 }
 
-func (c *fakePersonalServerCloudClient) CreateSSHKey(_ context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error) {
+func (c *fakePersonalServerCloudClient) CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerSSHKey{}, err
+	}
 	if sshKey.ID == 0 {
 		sshKey.ID = 3001
 	}
@@ -1879,12 +2214,21 @@ func (c *fakePersonalServerCloudClient) CreateSSHKey(_ context.Context, sshKey p
 	return sshKey, nil
 }
 
-func (c *fakePersonalServerCloudClient) CreateServer(_ context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {
+func (c *fakePersonalServerCloudClient) CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return personalServerCloudServer{}, nil, err
+	}
 	c.serverCreateRequest = request
+	if c.cancelAfterCreateServer != nil {
+		c.cancelAfterCreateServer()
+	}
 	return c.createdServer, []personalServerAction{{ID: 9001}}, nil
 }
 
-func (c *fakePersonalServerCloudClient) WaitActions(_ context.Context, actions []personalServerAction) error {
+func (c *fakePersonalServerCloudClient) WaitActions(ctx context.Context, actions []personalServerAction) error {
+	if err := c.recordContext(ctx); err != nil {
+		return err
+	}
 	if len(actions) == 0 {
 		return nil
 	}

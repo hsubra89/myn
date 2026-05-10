@@ -21,13 +21,13 @@ import (
 )
 
 type personalServerProvisioner interface {
-	Configure(out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error
+	Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error
 }
 
-type personalServerProvisionerFunc func(io.Writer, string, appConfig, configurePrompter) error
+type personalServerProvisionerFunc func(context.Context, io.Writer, string, appConfig, configurePrompter) error
 
-func (fn personalServerProvisionerFunc) Configure(out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
-	return fn(out, appConfigPath, cfg, prompter)
+func (fn personalServerProvisionerFunc) Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
+	return fn(ctx, out, appConfigPath, cfg, prompter)
 }
 
 type personalServerCloudClient interface {
@@ -200,7 +200,10 @@ type personalServerProvisioningGate struct {
 	passwordSaltReader io.Reader
 }
 
-func (gate personalServerProvisioningGate) Configure(out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
+func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(cfg.SSH.IdentityFile) == "" {
 		fmt.Fprintln(out, "Personal Server creation skipped: SSH identity is not configured.")
 		return nil
@@ -212,7 +215,7 @@ func (gate personalServerProvisioningGate) Configure(out io.Writer, appConfigPat
 	}
 
 	if cfg.PersonalServer.ServerID != 0 {
-		return gate.verifyConfiguredPersonalServer(out, appConfigPath, cfg, token, prompter)
+		return gate.verifyConfiguredPersonalServer(ctx, out, appConfigPath, cfg, token, prompter)
 	}
 
 	if !prompter.CanPrompt() {
@@ -221,12 +224,12 @@ func (gate personalServerProvisioningGate) Configure(out io.Writer, appConfigPat
 	}
 
 	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-	return gate.previewPersonalServerCreation(out, appConfigPath, token, cfg, prompter)
+	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }
 
-func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter) error {
+func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter) error {
 	client := gate.cloudClient(token)
-	server, found, err := client.ServerByID(context.Background(), cfg.PersonalServer.ServerID)
+	server, found, err := client.ServerByID(ctx, cfg.PersonalServer.ServerID)
 	if err != nil {
 		return fmt.Errorf("verify Personal Server %d in Hetzner: %w", cfg.PersonalServer.ServerID, err)
 	}
@@ -250,7 +253,7 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(out io
 		}
 		fmt.Fprintln(out, "Cleared stale Personal Server Configuration.")
 		fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-		return gate.previewPersonalServerCreation(out, appConfigPath, token, cfg, prompter)
+		return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 	}
 
 	fmt.Fprintf(out, "Personal Server already configured: server %d exists.\n", cfg.PersonalServer.ServerID)
@@ -259,12 +262,11 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(out io
 	return nil
 }
 
-func (gate personalServerProvisioningGate) previewPersonalServerCreation(out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
+func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
 	client, ok := gate.cloudClient(token).(personalServerPreviewCloudClient)
 	if !ok {
 		return fmt.Errorf("Personal Server preview requires a Hetzner client that can list Locations and Server Types")
 	}
-	ctx := context.Background()
 
 	locations, err := client.Locations(ctx)
 	if err != nil {
@@ -336,13 +338,11 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(out io.
 		if !ok {
 			return fmt.Errorf("Personal Server creation requires a Hetzner client that can create resources")
 		}
-		return gate.createPersonalServer(out, appConfigPath, cfg, createClient, plan)
+		return gate.createPersonalServer(ctx, out, appConfigPath, cfg, createClient, plan)
 	}
 }
 
-func (gate personalServerProvisioningGate) createPersonalServer(out io.Writer, appConfigPath string, cfg appConfig, client personalServerCreateCloudClient, plan personalServerCreationPlan) error {
-	ctx := context.Background()
-
+func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, client personalServerCreateCloudClient, plan personalServerCreationPlan) error {
 	if _, found, err := client.ServerByName(ctx, plan.ServerName); err != nil {
 		return fmt.Errorf("check for existing Personal Server name %q: %w", plan.ServerName, err)
 	} else if found {
@@ -398,15 +398,13 @@ func (gate personalServerProvisioningGate) createPersonalServer(out io.Writer, a
 		return fmt.Errorf("create Personal Server: %w", err)
 	}
 	if err := client.WaitActions(ctx, actions); err != nil {
+		if saveErr := gate.savePersonalServerConfig(appConfigPath, cfg, server); saveErr != nil {
+			return saveErr
+		}
 		return fmt.Errorf("wait for Personal Server create actions: %w", err)
 	}
 
-	cfg.PersonalServer = personalServerConfig{
-		ServerID: server.ID,
-		IPv4:     server.IPv4,
-		IPv6:     server.IPv6,
-	}
-	if err := gate.writeConfig(appConfigPath, cfg); err != nil {
+	if err := gate.savePersonalServerConfig(appConfigPath, cfg, server); err != nil {
 		return err
 	}
 
@@ -420,6 +418,15 @@ func (gate personalServerProvisioningGate) createPersonalServer(out io.Writer, a
 		return err
 	}
 	return writePersonalServerBootstrapReport(out, marker, plan, server)
+}
+
+func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPath string, cfg appConfig, server personalServerCloudServer) error {
+	cfg.PersonalServer = personalServerConfig{
+		ServerID: server.ID,
+		IPv4:     server.IPv4,
+		IPv6:     server.IPv6,
+	}
+	return gate.writeConfig(appConfigPath, cfg)
 }
 
 const (
@@ -466,10 +473,16 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 			}
 		}
 
+		if err := ctx.Err(); err != nil {
+			return personalServerBootstrapMarker{}, err
+		}
 		if pollCtx.Err() != nil {
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
 		if err := gate.personalServerSleep(pollCtx, gate.personalServerSSHPollInterval()); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return personalServerBootstrapMarker{}, ctxErr
+			}
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
 	}

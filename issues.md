@@ -47,6 +47,7 @@ These issues are written locally instead of being published to an issue tracker.
    - **User stories covered**: 55-56, 74-80
 
 8. **Harden failure handling and cancellation**
+   - **Status**: Done
    - **Type**: AFK
    - **Blocked by**: Issues 6 and 7
    - **User stories covered**: 24, 40, 66-67, 77-78
@@ -261,22 +262,24 @@ If bootstrap hard-fails or times out, keep the saved server identity and report 
 
 ## Issue 8: Harden failure handling and cancellation
 
+**Status**: Done
+
 ## What to build
 
 Make the full Personal Server provisioning path robust under cancellation and partial failures. Hetzner API calls, action waiting, root SSH polling, and bootstrap polling should respect command cancellation. Failure modes should preserve the agreed state boundaries: local config remains saved, supporting resources are not automatically cleaned up, created servers are saved even if bootstrap fails, and pricing failure does not block creation.
 
 ## Acceptance criteria
 
-- [ ] Hetzner API calls respect command cancellation.
-- [ ] Hetzner action waiting respects command cancellation.
-- [ ] Root SSH polling respects command cancellation.
-- [ ] Bootstrap marker polling respects command cancellation.
-- [ ] Cancellation before server creation does not save Personal Server Configuration.
-- [ ] Cancellation after server creation preserves saved server ID and IP addresses.
-- [ ] Bootstrap failure or timeout preserves saved server ID and IP addresses.
-- [ ] Supporting resources are not automatically cleaned up on cancellation or failure.
-- [ ] Pricing fetch failure explicitly reports price unavailable and still permits final confirmation.
-- [ ] Non-interactive mode never creates a Personal Server, including under stale config scenarios.
+- [x] Hetzner API calls respect command cancellation.
+- [x] Hetzner action waiting respects command cancellation.
+- [x] Root SSH polling respects command cancellation.
+- [x] Bootstrap marker polling respects command cancellation.
+- [x] Cancellation before server creation does not save Personal Server Configuration.
+- [x] Cancellation after server creation preserves saved server ID and IP addresses.
+- [x] Bootstrap failure or timeout preserves saved server ID and IP addresses.
+- [x] Supporting resources are not automatically cleaned up on cancellation or failure.
+- [x] Pricing fetch failure explicitly reports price unavailable and still permits final confirmation.
+- [x] Non-interactive mode never creates a Personal Server, including under stale config scenarios.
 
 ## Blocked by
 
