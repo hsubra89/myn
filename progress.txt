@@ -71,3 +71,10 @@
 - Live validation found and fixed two production issues: bootstrap marker version probes now run Homebrew, nvm, Node, npm, Codex, and Claude checks in the Personal Server User environment, and created Hetzner SSH key names are fingerprint-scoped to avoid name uniqueness conflicts while preserving reuse by fingerprint.
 - Verified the live path created a test Personal Server, waited for bootstrap, checked root/user SSH, user/group/root setup, remote project root ownership, Docker/Compose, Homebrew tools, nvm/Node default, and Git identity; the test server was deleted afterwards.
 - Verified with `go test ./...`, `go vet ./...`, and `ME_LIVE_HETZNER=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -timeout=30m -v` from `go/cli`.
+
+2026-05-10 - Completed Issue 10: Document Personal Server provisioning behavior.
+
+- Updated `go/cli/README.md` with the `me auth hetzner` prerequisite, interactive-only Personal Server creation behavior, existing-server verification, and saved Personal Server Configuration shape.
+- Documented Location and Server Type selection, final pricing confirmation, grouped install plan, Git identity handling, Docker group access, bootstrap waiting, SSH command output, reusable firewall behavior, and supporting-resource cleanup boundaries.
+- Documented out-of-scope behavior for SSH aliases, project cloning or syncing, dotfiles, GitHub credentials/authentication, and Rust toolchain installation.
+- Verified with `go test ./...` and `go vet ./...` from `go/cli`.

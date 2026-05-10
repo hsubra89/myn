@@ -59,6 +59,7 @@ These issues are written locally instead of being published to an issue tracker.
    - **User stories covered**: All
 
 10. **Document Personal Server provisioning behavior**
+   - **Status**: Done
    - **Type**: AFK
    - **Blocked by**: Issues 1-9
    - **User stories covered**: All
@@ -331,22 +332,24 @@ This validation must not commit `.env.local`, print the API key, or rely on a de
 
 ## Issue 10: Document Personal Server provisioning behavior
 
+**Status**: Done
+
 ## What to build
 
 Update user-facing development documentation for the new `me configure` Personal Server behavior. The documentation should explain the prerequisite auth command, interactive-only creation, saved config shape, Location and Server Type selection, final confirmation, installed software, SSH access, existing-server behavior, and known out-of-scope behaviors.
 
 ## Acceptance criteria
 
-- [ ] Documentation explains that `me auth hetzner` must be completed before Personal Server creation.
-- [ ] Documentation explains that non-interactive `configure` does not create a Personal Server.
-- [ ] Documentation shows the top-level Personal Server Configuration shape with server ID, IPv4, and assigned IPv6 only.
-- [ ] Documentation describes Location and Server Type selection using project glossary terms.
-- [ ] Documentation lists the grouped install plan: system services, Homebrew tools, and coding agents.
-- [ ] Documentation explains that Git identity is copied from available local config values but GitHub auth is not configured.
-- [ ] Documentation explains that Docker group membership is root-equivalent access even though sudo requires a password.
-- [ ] Documentation describes the final SSH commands and the use of the configured SSH identity.
-- [ ] Documentation states that existing firewall rules are not reset and supporting resources are not automatically cleaned up on failure.
-- [ ] Documentation states that projects, dotfiles, SSH aliases, GitHub credentials, and Rust toolchains are out of scope.
+- [x] Documentation explains that `me auth hetzner` must be completed before Personal Server creation.
+- [x] Documentation explains that non-interactive `configure` does not create a Personal Server.
+- [x] Documentation shows the top-level Personal Server Configuration shape with server ID, IPv4, and assigned IPv6 only.
+- [x] Documentation describes Location and Server Type selection using project glossary terms.
+- [x] Documentation lists the grouped install plan: system services, Homebrew tools, and coding agents.
+- [x] Documentation explains that Git identity is copied from available local config values but GitHub auth is not configured.
+- [x] Documentation explains that Docker group membership is root-equivalent access even though sudo requires a password.
+- [x] Documentation describes the final SSH commands and the use of the configured SSH identity.
+- [x] Documentation states that existing firewall rules are not reset and supporting resources are not automatically cleaned up on failure.
+- [x] Documentation states that projects, dotfiles, SSH aliases, GitHub credentials, and Rust toolchains are out of scope.
 
 ## Blocked by
 
