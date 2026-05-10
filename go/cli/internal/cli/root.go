@@ -20,6 +20,7 @@ func NewRootCommand(info BuildInfo) *cobra.Command {
 		SilenceUsage: true,
 	}
 
+	cmd.AddCommand(newAuthCommand())
 	cmd.AddCommand(newVersionCommand(info))
 
 	return cmd
