@@ -29,3 +29,11 @@
 - Replaced the temporary create prompt with a full pre-create plan summary covering Location, Server Type, server name, Personal Server User, SSH/firewall/network details, remote project root, grouped install plan, Git identity, and maximum monthly gross EUR price or unavailable pricing.
 - Declining final confirmation still creates no cloud resources and saves no transient Personal Server choices; accepting still stops at the later creation slice.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-10 - Completed Issue 5: Render Personal Server Bootstrap cloud-init.
+
+- Added a typed Personal Server Bootstrap cloud-init renderer using the YAML library, with inputs for the Personal Server User, password hash, SSH public key, remote project root, Git identity, and bootstrap tool plan.
+- The rendered cloud-init creates root and Personal Server User SSH authorization, password-backed sudo, Docker group membership, and a root-owned bootstrap script invoked by cloud-init.
+- The bootstrap script installs security updates, unattended upgrades, Docker from Docker's apt repository, user-owned Homebrew tools, nvm-managed LTS Node/npm, Codex, and Claude Code; coding agent failures are recorded as partial failures.
+- The completion marker records status, timestamp, reboot requirement, installed tool versions, skipped Git identity values, and partial failures.
+- Verified with `go test ./...` from `go/cli`.

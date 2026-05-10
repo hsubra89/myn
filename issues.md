@@ -29,6 +29,7 @@ These issues are written locally instead of being published to an issue tracker.
    - **User stories covered**: 28-29, 41-46, 68-71
 
 5. **Render Personal Server Bootstrap cloud-init**
+   - **Status**: Done
    - **Type**: AFK
    - **Blocked by**: Issue 4
    - **User stories covered**: 44-67, 70-71, 73
@@ -161,6 +162,8 @@ The final confirmation should show the selected Location, selected Server Type, 
 
 ## Issue 5: Render Personal Server Bootstrap cloud-init
 
+**Status**: Done
+
 ## What to build
 
 Build the typed Personal Server Bootstrap renderer using a YAML library. The renderer should produce cloud-init user data that creates the Personal Server User, keeps key-based root SSH enabled, authorizes the configured SSH identity for root and the user, creates the configured remote project root exactly under the user's home, installs the required system services and user-owned development tools, configures available Git identity values, and writes a completion marker.
@@ -169,26 +172,26 @@ Cloud-init should hard-fail essential setup and report coding agent failures as 
 
 ## Acceptance criteria
 
-- [ ] Renderer accepts typed inputs for user, password hash, SSH public key, remote project root, Git identity values, and bootstrap tool plan.
-- [ ] Generated cloud-init parses as valid YAML in tests.
-- [ ] Personal Server User is created with Bash, `sudo`, and `docker` group membership.
-- [ ] Sudo requires the configured password.
-- [ ] Root SSH remains key-based and enabled after bootstrap.
-- [ ] Configured SSH public key authorizes both root and the Personal Server User.
-- [ ] Remote project root is created exactly, including spaces, and owned by the Personal Server User.
-- [ ] Security updates are applied, unattended security upgrades are enabled, and reboot happens automatically when required.
-- [ ] Docker Engine and Docker Compose are installed from Docker's official apt repository.
-- [ ] Homebrew is installed and owned by the Personal Server User.
-- [ ] Homebrew installs `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, and `nvm`.
-- [ ] No Rust toolchain is installed.
-- [ ] Homebrew `nvm` is initialized for the Personal Server User, latest LTS Node.js is installed, and it is set as default.
-- [ ] Codex is installed with the nvm-managed LTS npm as the Personal Server User.
-- [ ] Claude Code is installed as the Personal Server User with the official installer.
-- [ ] GitHub CLI is installed but not authenticated.
-- [ ] No local dotfiles, shell configuration, GitHub credentials, or project contents are copied.
-- [ ] Completion marker includes status, timestamp, reboot information, installed tool versions, and partial failure information.
-- [ ] System update/security setup, user creation, SSH authorization, remote root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup are hard failures.
-- [ ] Codex and Claude Code installation failures are reported as partial failures and do not fail the whole bootstrap.
+- [x] Renderer accepts typed inputs for user, password hash, SSH public key, remote project root, Git identity values, and bootstrap tool plan.
+- [x] Generated cloud-init parses as valid YAML in tests.
+- [x] Personal Server User is created with Bash, `sudo`, and `docker` group membership.
+- [x] Sudo requires the configured password.
+- [x] Root SSH remains key-based and enabled after bootstrap.
+- [x] Configured SSH public key authorizes both root and the Personal Server User.
+- [x] Remote project root is created exactly, including spaces, and owned by the Personal Server User.
+- [x] Security updates are applied, unattended security upgrades are enabled, and reboot happens automatically when required.
+- [x] Docker Engine and Docker Compose are installed from Docker's official apt repository.
+- [x] Homebrew is installed and owned by the Personal Server User.
+- [x] Homebrew installs `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, and `nvm`.
+- [x] No Rust toolchain is installed.
+- [x] Homebrew `nvm` is initialized for the Personal Server User, latest LTS Node.js is installed, and it is set as default.
+- [x] Codex is installed with the nvm-managed LTS npm as the Personal Server User.
+- [x] Claude Code is installed as the Personal Server User with the official installer.
+- [x] GitHub CLI is installed but not authenticated.
+- [x] No local dotfiles, shell configuration, GitHub credentials, or project contents are copied.
+- [x] Completion marker includes status, timestamp, reboot information, installed tool versions, and partial failure information.
+- [x] System update/security setup, user creation, SSH authorization, remote root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup are hard failures.
+- [x] Codex and Claude Code installation failures are reported as partial failures and do not fail the whole bootstrap.
 
 ## Blocked by
 
