@@ -23,23 +23,24 @@ type configureOptions struct {
 }
 
 type configureDeps struct {
-	appConfigPath      func() (string, error)
-	userHomeDir        func() (string, error)
-	workingDir         func() (string, error)
-	gitRoot            func(string) (string, error)
-	stat               func(string) (os.FileInfo, error)
-	readDir            func(string) ([]os.DirEntry, error)
-	readFile           func(string) ([]byte, error)
-	writeFile          func(string, []byte, os.FileMode) error
-	mkdirAll           func(string, os.FileMode) error
-	chmod              func(string, os.FileMode) error
-	sshPublicKey       func(string) (string, error)
-	generateSSHKeyPair func(string, string, string) error
-	sshAgentList       func() (string, error)
-	sshAgentAdd        func(string) error
-	hostname           func() (string, error)
-	currentUsername    func() string
-	prompter           configurePrompter
+	appConfigPath             func() (string, error)
+	userHomeDir               func() (string, error)
+	workingDir                func() (string, error)
+	gitRoot                   func(string) (string, error)
+	stat                      func(string) (os.FileInfo, error)
+	readDir                   func(string) ([]os.DirEntry, error)
+	readFile                  func(string) ([]byte, error)
+	writeFile                 func(string, []byte, os.FileMode) error
+	mkdirAll                  func(string, os.FileMode) error
+	chmod                     func(string, os.FileMode) error
+	sshPublicKey              func(string) (string, error)
+	generateSSHKeyPair        func(string, string, string) error
+	sshAgentList              func() (string, error)
+	sshAgentAdd               func(string) error
+	hostname                  func() (string, error)
+	currentUsername           func() string
+	prompter                  configurePrompter
+	personalServerProvisioner personalServerProvisioner
 }
 
 type configurePrompter interface {
@@ -174,6 +175,9 @@ func runConfigure(out io.Writer, opts configureOptions, deps configureDeps) erro
 		fmt.Fprintf(out, "SSH identity: ~/%s\n", cfg.SSH.IdentityFile)
 	} else {
 		fmt.Fprintln(out, "SSH identity: not configured")
+	}
+	if personalServerErr := deps.personalServerProvisioner.Configure(out, cfg, deps.prompter.CanPrompt()); personalServerErr != nil && sshErr == nil {
+		return personalServerErr
 	}
 	return sshErr
 }
@@ -478,6 +482,9 @@ func fillConfigureDeps(deps configureDeps) configureDeps {
 	}
 	if deps.prompter == nil {
 		deps.prompter = huhPrompter{}
+	}
+	if deps.personalServerProvisioner == nil {
+		deps.personalServerProvisioner = personalServerProvisioningGate{}
 	}
 	return deps
 }

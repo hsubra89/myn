@@ -5,6 +5,7 @@ These issues are written locally instead of being published to an issue tracker.
 ## Proposed Breakdown
 
 1. **Persist and gate Personal Server Configuration**
+   - **Status**: Done
    - **Type**: AFK
    - **Blocked by**: None
    - **User stories covered**: 1-8, 25-27, 48, 51-52
@@ -64,14 +65,14 @@ This slice establishes the safe defaults: Personal Server creation is interactiv
 
 ## Acceptance criteria
 
-- [ ] The config schema supports a top-level Personal Server Configuration with only `serverID`, `ipv4`, and assigned `ipv6`.
-- [ ] Empty Personal Server Configuration is omitted from saved config.
-- [ ] Existing local root, remote root, and SSH identity configuration behavior still works.
-- [ ] Local roots and SSH identity are saved before the Personal Server branch can run.
-- [ ] Missing Hetzner Credentials do not fail all of `configure`; they skip Personal Server creation with a clear message.
-- [ ] Missing or invalid SSH identity skips Personal Server creation with a clear message.
-- [ ] Non-interactive `configure` does not create a Personal Server.
-- [ ] `configure` does not edit SSH config aliases, clone projects, sync projects, or copy dotfiles.
+- [x] The config schema supports a top-level Personal Server Configuration with only `serverID`, `ipv4`, and assigned `ipv6`.
+- [x] Empty Personal Server Configuration is omitted from saved config.
+- [x] Existing local root, remote root, and SSH identity configuration behavior still works.
+- [x] Local roots and SSH identity are saved before the Personal Server branch can run.
+- [x] Missing Hetzner Credentials do not fail all of `configure`; they skip Personal Server creation with a clear message.
+- [x] Missing or invalid SSH identity skips Personal Server creation with a clear message.
+- [x] Non-interactive `configure` does not create a Personal Server.
+- [x] `configure` does not edit SSH config aliases, clone projects, sync projects, or copy dotfiles.
 
 ## Blocked by
 

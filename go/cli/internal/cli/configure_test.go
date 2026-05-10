@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func TestConfigureCommandFlagsNormalizeAndPersist(t *testing.T) {
 		t.Fatalf("execute configure: %v", err)
 	}
 
-	const want = "Saved configuration.\nLocal project root: ~/Code Projects\nRemote project root: ~/Remote Projects\nSSH identity: ~/.ssh/id_ed25519\n"
+	const want = "Saved configuration.\nLocal project root: ~/Code Projects\nRemote project root: ~/Remote Projects\nSSH identity: ~/.ssh/id_ed25519\nPersonal Server creation skipped: configure is running non-interactively.\n"
 	if got := out.String(); got != want {
 		t.Fatalf("output mismatch:\nwant %q\ngot  %q", want, got)
 	}
@@ -263,6 +264,9 @@ func TestRunConfigureNonInteractiveUsesExistingSSHIdentity(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "me", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
 		SSH: sshConfig{IdentityFile: identity.Relative},
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -288,8 +292,97 @@ func TestRunConfigureNonInteractiveUsesExistingSSHIdentity(t *testing.T) {
 		t.Fatalf("run configure: %v", err)
 	}
 
+	if !strings.Contains(out.String(), "Personal Server creation skipped: configure is running non-interactively.") {
+		t.Fatalf("expected non-interactive Personal Server skip, got %q", out.String())
+	}
 	assertSavedProjectsConfig(t, configPath, "projects", "projects")
 	assertSavedSSHIdentity(t, configPath, ".ssh/id_ed25519")
+}
+
+func TestRunConfigureSkipsPersonalServerWhenHetznerCredentialsMissing(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		SSH: sshConfig{IdentityFile: identity.Relative},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		sshAgentList: testSSHAgentListFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Personal Server creation skipped: Hetzner Credentials are not configured. Run `me auth hetzner` first.") {
+		t.Fatalf("expected missing credentials skip, got %q", out.String())
+	}
+	assertSavedProjectsConfig(t, configPath, "projects", "projects")
+	assertSavedSSHIdentity(t, configPath, ".ssh/id_ed25519")
+}
+
+func TestRunConfigureSavesLocalConfigBeforePersonalServerBranch(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+
+	called := false
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "remote projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		sshAgentList: testSSHAgentListFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisionerFunc(func(_ io.Writer, _ appConfig, _ bool) error {
+			called = true
+			saved, err := loadAppConfig(configPath)
+			if err != nil {
+				t.Fatalf("load saved config inside Personal Server branch: %v", err)
+			}
+			if got, want := saved.Projects.LocalRoot, "projects"; got != want {
+				t.Fatalf("saved local root before Personal Server branch: want %q, got %q", want, got)
+			}
+			if got, want := saved.Projects.RemoteRoot, "remote projects"; got != want {
+				t.Fatalf("saved remote root before Personal Server branch: want %q, got %q", want, got)
+			}
+			if got, want := saved.SSH.IdentityFile, ".ssh/id_ed25519"; got != want {
+				t.Fatalf("saved SSH identity before Personal Server branch: want %q, got %q", want, got)
+			}
+			return nil
+		}),
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+	if !called {
+		t.Fatal("Personal Server branch was not called")
+	}
 }
 
 func TestRunConfigureNonInteractiveMissingSSHIdentitySavesRootsAndFails(t *testing.T) {
@@ -320,6 +413,9 @@ func TestRunConfigureNonInteractiveMissingSSHIdentitySavesRootsAndFails(t *testi
 	}
 	if !strings.Contains(out.String(), "SSH identity: not configured") {
 		t.Fatalf("expected not configured output, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Personal Server creation skipped: SSH identity is not configured.") {
+		t.Fatalf("expected missing SSH identity Personal Server skip, got %q", out.String())
 	}
 
 	assertSavedProjectsConfig(t, configPath, "projects", "projects")

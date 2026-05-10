@@ -1,0 +1,7 @@
+2026-05-10 - Completed Issue 1: Persist and gate Personal Server Configuration.
+
+- Added the top-level Personal Server Configuration shape to app config, saving only `serverID`, `ipv4`, and `ipv6`, and omitting it when empty.
+- Added a separate Personal Server provisioning gate that runs after local roots and SSH identity are saved.
+- `me configure` now skips Personal Server creation with clear messages when SSH identity is missing, Hetzner Credentials are missing, or configure is non-interactive.
+- Added tests for config serialization, local save-before-branch sequencing, missing Hetzner Credentials, missing SSH identity, and non-interactive gating.
+- Verified with `go test ./...` from `go/cli`.
