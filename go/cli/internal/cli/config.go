@@ -108,11 +108,18 @@ func saveAppConfig(path string, cfg appConfig) error {
 	data = append(data, '\n')
 
 	dir := filepath.Dir(path)
+	_, statErr := os.Stat(dir)
+	createdDir := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !createdDir {
+		return fmt.Errorf("stat config directory: %w", statErr)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("secure config directory: %w", err)
+	if createdDir {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("secure config directory: %w", err)
+		}
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
