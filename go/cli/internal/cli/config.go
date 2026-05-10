@@ -11,6 +11,7 @@ import (
 type appConfig struct {
 	Auth     authConfig     `json:"auth,omitempty"`
 	Projects projectsConfig `json:"projects,omitempty"`
+	SSH      sshConfig      `json:"ssh,omitempty"`
 }
 
 type authConfig struct {
@@ -26,10 +27,15 @@ type projectsConfig struct {
 	RemoteRoot string `json:"remoteRoot,omitempty"`
 }
 
+type sshConfig struct {
+	IdentityFile string `json:"identityFile,omitempty"`
+}
+
 func (cfg appConfig) MarshalJSON() ([]byte, error) {
 	type appConfigJSON struct {
 		Auth     *authConfig     `json:"auth,omitempty"`
 		Projects *projectsConfig `json:"projects,omitempty"`
+		SSH      *sshConfig      `json:"ssh,omitempty"`
 	}
 
 	var out appConfigJSON
@@ -38,6 +44,9 @@ func (cfg appConfig) MarshalJSON() ([]byte, error) {
 	}
 	if !cfg.Projects.isZero() {
 		out.Projects = &cfg.Projects
+	}
+	if !cfg.SSH.isZero() {
+		out.SSH = &cfg.SSH
 	}
 
 	return json.Marshal(out)
@@ -53,6 +62,10 @@ func (cfg hetznerConfig) isZero() bool {
 
 func (cfg projectsConfig) isZero() bool {
 	return cfg.LocalRoot == "" && cfg.RemoteRoot == ""
+}
+
+func (cfg sshConfig) isZero() bool {
+	return cfg.IdentityFile == ""
 }
 
 func defaultAppConfigPath(env func(string) string) (string, error) {

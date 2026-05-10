@@ -37,14 +37,18 @@ This creates `~/.local/bin/me` as a launcher for this checkout. It runs
 go run ./cmd/me configure
 ```
 
-The command configures project roots for this machine and the remote machine.
-It stores normalized home-relative paths in the `me` config:
+The command configures project roots for this machine and the remote machine,
+plus the Ed25519 SSH identity that future `me`-provisioned servers should
+trust. It stores normalized home-relative paths in the `me` config:
 
 ```json
 {
   "projects": {
     "localRoot": "projects",
     "remoteRoot": "projects"
+  },
+  "ssh": {
+    "identityFile": ".ssh/id_ed25519"
   }
 }
 ```
@@ -57,11 +61,31 @@ The remote root must be relative to the remote user's home directory. The
 prompt accepts `projects` or `~/projects` and stores `projects`; absolute
 remote paths are rejected.
 
+The SSH identity must be an existing Ed25519 private key under the current
+user's home directory. Interactive configuration scans `~/.ssh/*.pub` for
+Ed25519 keypairs, lets you select the current configured identity when it is
+valid, and always offers to generate a new keypair. Generated keys use
+`~/.ssh/id_ed25519` first and fall back to `~/.ssh/id_me_25519` when the
+default path is occupied. If an existing private key is missing its `.pub`
+file, `configure` regenerates it with `ssh-keygen -y`.
+
+Generated keys prompt once for a masked passphrase, which may be empty, and use
+`<user>@<hostname>` as the key comment. When the selected key is not already
+loaded in `ssh-agent`, `configure` asks whether to add it; this is recommended
+for remote server access. Agent-add failures are warnings and do not block
+config saving.
+
 Non-interactive options:
 
 ```sh
-go run ./cmd/me configure --local-root projects --remote-root projects
+go run ./cmd/me configure \
+  --local-root projects \
+  --remote-root projects \
+  --ssh-identity-file ~/.ssh/id_ed25519
 ```
+
+Non-interactive configuration accepts an existing `ssh.identityFile` from the
+config or a `--ssh-identity-file` value. It does not generate SSH keys.
 
 ## Hetzner Authentication
 

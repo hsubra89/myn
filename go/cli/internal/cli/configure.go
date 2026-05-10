@@ -14,24 +14,40 @@ import (
 )
 
 type configureOptions struct {
-	localRoot     string
-	localRootSet  bool
-	remoteRoot    string
-	remoteRootSet bool
+	localRoot          string
+	localRootSet       bool
+	remoteRoot         string
+	remoteRootSet      bool
+	sshIdentityFile    string
+	sshIdentityFileSet bool
 }
 
 type configureDeps struct {
-	appConfigPath func() (string, error)
-	userHomeDir   func() (string, error)
-	workingDir    func() (string, error)
-	gitRoot       func(string) (string, error)
-	stat          func(string) (os.FileInfo, error)
-	prompter      configurePrompter
+	appConfigPath      func() (string, error)
+	userHomeDir        func() (string, error)
+	workingDir         func() (string, error)
+	gitRoot            func(string) (string, error)
+	stat               func(string) (os.FileInfo, error)
+	readDir            func(string) ([]os.DirEntry, error)
+	readFile           func(string) ([]byte, error)
+	writeFile          func(string, []byte, os.FileMode) error
+	mkdirAll           func(string, os.FileMode) error
+	chmod              func(string, os.FileMode) error
+	sshPublicKey       func(string) (string, error)
+	generateSSHKeyPair func(string, string, string) error
+	sshAgentList       func() (string, error)
+	sshAgentAdd        func(string) error
+	hostname           func() (string, error)
+	currentUsername    func() string
+	prompter           configurePrompter
 }
 
 type configurePrompter interface {
 	CanPrompt() bool
+	Confirm(title string, affirmative bool) (bool, error)
 	Input(title string, defaultValue string, validate func(string) error) (string, error)
+	Password(title string) (string, error)
+	SelectSSHIdentity(choices []sshIdentityPromptChoice, selected int) (sshIdentityPromptChoice, error)
 }
 
 func newConfigureCommand() *cobra.Command {
@@ -44,12 +60,14 @@ func newConfigureCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.localRootSet = cmd.Flags().Changed("local-root")
 			opts.remoteRootSet = cmd.Flags().Changed("remote-root")
+			opts.sshIdentityFileSet = cmd.Flags().Changed("ssh-identity-file")
 			return runConfigure(cmd.OutOrStdout(), opts, defaultConfigureDeps())
 		},
 	}
 
 	cmd.Flags().StringVar(&opts.localRoot, "local-root", "", "Local project root under your home directory")
 	cmd.Flags().StringVar(&opts.remoteRoot, "remote-root", "", "Remote project root under the remote home directory")
+	cmd.Flags().StringVar(&opts.sshIdentityFile, "ssh-identity-file", "", "Existing Ed25519 private key path to use for remote SSH")
 
 	return cmd
 }
@@ -65,7 +83,42 @@ func defaultConfigureDeps() configureDeps {
 		workingDir:  os.Getwd,
 		gitRoot:     gitRootFromWorkingDir,
 		stat:        os.Stat,
-		prompter:    huhPrompter{},
+		readDir:     os.ReadDir,
+		readFile:    os.ReadFile,
+		writeFile:   os.WriteFile,
+		mkdirAll:    os.MkdirAll,
+		chmod:       os.Chmod,
+		sshPublicKey: func(identityPath string) (string, error) {
+			output, err := exec.Command("ssh-keygen", "-y", "-f", identityPath).CombinedOutput()
+			if err != nil {
+				return "", commandOutputError("ssh-keygen -y", output, err)
+			}
+			return string(output), nil
+		},
+		generateSSHKeyPair: func(identityPath string, passphrase string, comment string) error {
+			output, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", passphrase, "-C", comment, "-f", identityPath).CombinedOutput()
+			if err != nil {
+				return commandOutputError("ssh-keygen", output, err)
+			}
+			return nil
+		},
+		sshAgentList: func() (string, error) {
+			output, err := exec.Command("ssh-add", "-l", "-E", "sha256").CombinedOutput()
+			if err != nil {
+				return string(output), err
+			}
+			return string(output), nil
+		},
+		sshAgentAdd: func(identityPath string) error {
+			cmd := exec.Command("ssh-add", identityPath)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
+		},
+		hostname:        os.Hostname,
+		currentUsername: currentOSUsername,
+		prompter:        huhPrompter{},
 	}
 }
 
@@ -99,14 +152,30 @@ func runConfigure(out io.Writer, opts configureOptions, deps configureDeps) erro
 
 	cfg.Projects.LocalRoot = localRoot
 	cfg.Projects.RemoteRoot = remoteRoot
+
+	sshResult, sshErr := configureSSHIdentity(opts, cfg, home, deps)
+	if sshErr == nil {
+		cfg.SSH.IdentityFile = sshResult.identityFile
+	} else if sshResult.clearIdentity {
+		cfg.SSH.IdentityFile = ""
+	}
+
 	if err := saveAppConfig(appConfigPath, cfg); err != nil {
 		return err
 	}
 
+	for _, message := range sshResult.messages {
+		fmt.Fprintln(out, message)
+	}
 	fmt.Fprintln(out, "Saved configuration.")
 	fmt.Fprintf(out, "Local project root: ~/%s\n", localRoot)
 	fmt.Fprintf(out, "Remote project root: ~/%s\n", remoteRoot)
-	return nil
+	if cfg.SSH.IdentityFile != "" {
+		fmt.Fprintf(out, "SSH identity: ~/%s\n", cfg.SSH.IdentityFile)
+	} else {
+		fmt.Fprintln(out, "SSH identity: not configured")
+	}
+	return sshErr
 }
 
 func configureLocalRoot(opts configureOptions, cfg appConfig, home string, deps configureDeps) (string, error) {
@@ -149,6 +218,188 @@ func configureRemoteRoot(opts configureOptions, cfg appConfig, localRoot string,
 	return normalizeRemoteProjectRoot(input)
 }
 
+type configureSSHIdentityResult struct {
+	identityFile  string
+	messages      []string
+	clearIdentity bool
+}
+
+func configureSSHIdentity(opts configureOptions, cfg appConfig, home string, deps configureDeps) (configureSSHIdentityResult, error) {
+	if opts.sshIdentityFileSet {
+		candidate, err := loadSSHIdentity(opts.sshIdentityFile, home, deps)
+		if err != nil {
+			return configureSSHIdentityResult{}, err
+		}
+		return configureSSHIdentityResult{
+			identityFile: candidate.IdentityFile,
+			messages:     nonEmptyMessages(candidate.Warning),
+		}, nil
+	}
+
+	var current sshIdentityCandidate
+	currentConfigured := strings.TrimSpace(cfg.SSH.IdentityFile) != ""
+	currentValid := false
+	if currentConfigured {
+		if candidate, err := loadSSHIdentity(cfg.SSH.IdentityFile, home, deps); err == nil {
+			current = candidate
+			currentValid = true
+		}
+	}
+
+	if !deps.prompter.CanPrompt() {
+		if currentValid {
+			return configureSSHIdentityResult{
+				identityFile: current.IdentityFile,
+				messages:     nonEmptyMessages(current.Warning),
+			}, nil
+		}
+		return configureSSHIdentityResult{clearIdentity: true}, sshIdentityNotConfiguredError{
+			reason: "SSH identity is not configured; pass --ssh-identity-file",
+		}
+	}
+
+	candidates, err := discoverSSHIdentities(home, deps)
+	if err != nil {
+		return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
+	}
+	if currentValid {
+		candidates = append([]sshIdentityCandidate{current}, candidates...)
+	}
+
+	choices := dedupeSSHIdentityChoices(candidates)
+	selected := selectedSSHIdentityChoice(choices, current)
+	choices = append(choices, sshIdentityPromptChoice{
+		Label:    generateSSHIdentityChoiceText,
+		Generate: true,
+	})
+
+	choice, err := deps.prompter.SelectSSHIdentity(choices, selected)
+	if err != nil {
+		return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
+	}
+
+	var candidate sshIdentityCandidate
+	var messages []string
+	if choice.Generate {
+		generated, err := configureGeneratedSSHIdentity(home, deps)
+		if err != nil {
+			return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
+		}
+		candidate = generated
+	} else {
+		candidate, err = loadSSHIdentity(choice.Identity.IdentityFile, home, deps)
+		if err != nil {
+			return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
+		}
+		messages = append(messages, candidate.Warning)
+	}
+
+	agentMessages, err := maybeAddSSHIdentityToAgent(candidate, deps)
+	if err != nil {
+		return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
+	}
+	messages = append(messages, agentMessages...)
+
+	return configureSSHIdentityResult{
+		identityFile: candidate.IdentityFile,
+		messages:     nonEmptyMessages(messages...),
+	}, nil
+}
+
+func selectedSSHIdentityChoice(choices []sshIdentityPromptChoice, current sshIdentityCandidate) int {
+	if current.IdentityFile != "" {
+		for index, choice := range choices {
+			if choice.Identity.IdentityFile == current.IdentityFile {
+				return index
+			}
+		}
+	}
+	for index, choice := range choices {
+		if choice.Identity.IdentityFile == primaryGeneratedSSHIdentity {
+			return index
+		}
+	}
+	return 0
+}
+
+func configureGeneratedSSHIdentity(home string, deps configureDeps) (sshIdentityCandidate, error) {
+	target, err := generatedSSHIdentityTarget(home, deps)
+	if err != nil {
+		return sshIdentityCandidate{}, err
+	}
+	if target.Recovered != nil {
+		return *target.Recovered, nil
+	}
+
+	generate, err := deps.prompter.Confirm(fmt.Sprintf("Generate new Ed25519 SSH keypair at ~/%s?", target.IdentityFile), true)
+	if err != nil {
+		return sshIdentityCandidate{}, err
+	}
+	if !generate {
+		return sshIdentityCandidate{}, sshIdentityNotConfiguredError{reason: "SSH identity was not configured"}
+	}
+
+	passphrase, err := deps.prompter.Password("SSH key passphrase (empty allowed)")
+	if err != nil {
+		return sshIdentityCandidate{}, err
+	}
+
+	sshDir := filepath.Dir(target.IdentityPath)
+	if err := deps.mkdirAll(sshDir, 0o700); err != nil {
+		return sshIdentityCandidate{}, fmt.Errorf("create ~/.ssh: %w", err)
+	}
+	if err := deps.chmod(sshDir, 0o700); err != nil {
+		return sshIdentityCandidate{}, fmt.Errorf("secure ~/.ssh: %w", err)
+	}
+
+	if err := deps.generateSSHKeyPair(target.IdentityPath, passphrase, generatedSSHKeyComment(deps)); err != nil {
+		return sshIdentityCandidate{}, err
+	}
+	if err := deps.chmod(target.IdentityPath, 0o600); err != nil {
+		return sshIdentityCandidate{}, fmt.Errorf("secure SSH identity: %w", err)
+	}
+	if err := deps.chmod(target.IdentityPath+".pub", 0o644); err != nil {
+		return sshIdentityCandidate{}, fmt.Errorf("secure SSH public key: %w", err)
+	}
+
+	return loadSSHIdentity(target.IdentityFile, home, deps)
+}
+
+func maybeAddSSHIdentityToAgent(candidate sshIdentityCandidate, deps configureDeps) ([]string, error) {
+	if candidate.Fingerprint != "" {
+		if output, err := deps.sshAgentList(); err == nil && sshAgentHasFingerprint(output, candidate.Fingerprint) {
+			return nil, nil
+		}
+	}
+
+	add, err := deps.prompter.Confirm(fmt.Sprintf("Add SSH identity ~/%s to ssh-agent? Recommended for remote server access.", candidate.IdentityFile), true)
+	if err != nil {
+		return nil, err
+	}
+	if !add {
+		return []string{"SSH identity was not added to ssh-agent."}, nil
+	}
+
+	if err := deps.sshAgentAdd(candidate.IdentityPath); err != nil {
+		return []string{fmt.Sprintf("Warning: could not add SSH identity ~/%s to ssh-agent: %v", candidate.IdentityFile, err)}, nil
+	}
+	return nil, nil
+}
+
+func sshAgentHasFingerprint(output string, fingerprint string) bool {
+	return strings.Contains(output, fingerprint)
+}
+
+func nonEmptyMessages(messages ...string) []string {
+	var out []string
+	for _, message := range messages {
+		if strings.TrimSpace(message) != "" {
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
 func fillConfigureDeps(deps configureDeps) configureDeps {
 	if deps.appConfigPath == nil {
 		env := os.Getenv
@@ -167,6 +418,63 @@ func fillConfigureDeps(deps configureDeps) configureDeps {
 	}
 	if deps.stat == nil {
 		deps.stat = os.Stat
+	}
+	if deps.readDir == nil {
+		deps.readDir = os.ReadDir
+	}
+	if deps.readFile == nil {
+		deps.readFile = os.ReadFile
+	}
+	if deps.writeFile == nil {
+		deps.writeFile = os.WriteFile
+	}
+	if deps.mkdirAll == nil {
+		deps.mkdirAll = os.MkdirAll
+	}
+	if deps.chmod == nil {
+		deps.chmod = os.Chmod
+	}
+	if deps.sshPublicKey == nil {
+		deps.sshPublicKey = func(identityPath string) (string, error) {
+			output, err := exec.Command("ssh-keygen", "-y", "-f", identityPath).CombinedOutput()
+			if err != nil {
+				return "", commandOutputError("ssh-keygen -y", output, err)
+			}
+			return string(output), nil
+		}
+	}
+	if deps.generateSSHKeyPair == nil {
+		deps.generateSSHKeyPair = func(identityPath string, passphrase string, comment string) error {
+			output, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", passphrase, "-C", comment, "-f", identityPath).CombinedOutput()
+			if err != nil {
+				return commandOutputError("ssh-keygen", output, err)
+			}
+			return nil
+		}
+	}
+	if deps.sshAgentList == nil {
+		deps.sshAgentList = func() (string, error) {
+			output, err := exec.Command("ssh-add", "-l", "-E", "sha256").CombinedOutput()
+			if err != nil {
+				return string(output), err
+			}
+			return string(output), nil
+		}
+	}
+	if deps.sshAgentAdd == nil {
+		deps.sshAgentAdd = func(identityPath string) error {
+			cmd := exec.Command("ssh-add", identityPath)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
+		}
+	}
+	if deps.hostname == nil {
+		deps.hostname = os.Hostname
+	}
+	if deps.currentUsername == nil {
+		deps.currentUsername = currentOSUsername
 	}
 	if deps.prompter == nil {
 		deps.prompter = huhPrompter{}
@@ -226,6 +534,14 @@ func gitRootFromWorkingDir(cwd string) (string, error) {
 		return "", fmt.Errorf("git returned an empty project root")
 	}
 	return root, nil
+}
+
+func commandOutputError(command string, output []byte, err error) error {
+	message := strings.TrimSpace(string(output))
+	if message == "" {
+		return fmt.Errorf("%s: %w", command, err)
+	}
+	return fmt.Errorf("%s: %w: %s", command, err, message)
 }
 
 func normalizeLocalProjectRoot(input string, home string, stat func(string) (os.FileInfo, error)) (string, error) {

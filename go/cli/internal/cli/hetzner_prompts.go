@@ -88,6 +88,38 @@ func (huhPrompter) Input(title string, defaultValue string, validate func(string
 	return value, nil
 }
 
+func (huhPrompter) Password(title string) (string, error) {
+	var value string
+	if err := huh.NewInput().
+		Title(title).
+		Password(true).
+		Value(&value).
+		Run(); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (huhPrompter) SelectSSHIdentity(choices []sshIdentityPromptChoice, selected int) (sshIdentityPromptChoice, error) {
+	options := make([]huh.Option[int], 0, len(choices))
+	for index, choice := range choices {
+		options = append(options, huh.NewOption(choice.Label, index))
+	}
+
+	if selected < 0 || selected >= len(choices) {
+		selected = 0
+	}
+	if err := huh.NewSelect[int]().
+		Title("Select SSH identity for remote server access").
+		Options(options...).
+		Value(&selected).
+		Run(); err != nil {
+		return sshIdentityPromptChoice{}, err
+	}
+
+	return choices[selected], nil
+}
+
 func isTerminal(file *os.File) bool {
 	stat, err := file.Stat()
 	return err == nil && stat.Mode()&os.ModeCharDevice != 0
