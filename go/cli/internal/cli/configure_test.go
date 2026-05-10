@@ -404,6 +404,47 @@ func TestRunConfigureInteractiveGeneratesSSHIdentityWithFallbackAndAgentPrompt(t
 	assertSavedSSHIdentity(t, configPath, ".ssh/id_me_25519")
 }
 
+func TestRunConfigureInteractiveWarnsWhenRecoveredGeneratedSSHIdentityHasBroadPermissions(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "recovered@host", 0o644)
+	if err := os.Remove(identity.PublicPath); err != nil {
+		t.Fatalf("remove public key: %v", err)
+	}
+
+	configPath := filepath.Join(t.TempDir(), "me", "config.json")
+	prompter := &fakeConfigurePrompter{
+		canPrompt:     true,
+		sshSelections: []int{0},
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		sshAgentList: testSSHAgentListFunc(identity),
+		prompter:     prompter,
+	})
+	if err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Warning: SSH identity ~/.ssh/id_ed25519 permissions are broader than recommended.") {
+		t.Fatalf("expected permission warning, got %q", out.String())
+	}
+	assertSavedSSHIdentity(t, configPath, ".ssh/id_ed25519")
+}
+
 func TestRunConfigureInteractiveWarnsWhenAgentAddFails(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))

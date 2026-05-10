@@ -291,8 +291,8 @@ func configureSSHIdentity(opts configureOptions, cfg appConfig, home string, dep
 		if err != nil {
 			return configureSSHIdentityResult{clearIdentity: currentConfigured && !currentValid}, err
 		}
-		messages = append(messages, candidate.Warning)
 	}
+	messages = append(messages, candidate.Warning)
 
 	agentMessages, err := maybeAddSSHIdentityToAgent(candidate, deps)
 	if err != nil {
