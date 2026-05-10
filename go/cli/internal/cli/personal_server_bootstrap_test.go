@@ -71,6 +71,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	script := parsed.bootstrapScript()
 	for _, want := range []string{
 		"ME_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
+		"export ME_USER='harish'",
 		"install -d -o \"$ME_USER\" -g \"$ME_USER\" \"$ME_REMOTE_PROJECT_ROOT\"",
 		"systemctl enable --now unattended-upgrades",
 		"APT::Periodic::Unattended-Upgrade \"1\";",
@@ -91,6 +92,10 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"\"timestamp\"",
 		"\"rebootRequired\"",
 		"\"toolVersions\"",
+		"me_user = os.environ.get(\"ME_USER\", \"\")",
+		"\"sudo\", \"-H\", \"-u\", me_user",
+		"\"brew\": user_command([\"/home/linuxbrew/.linuxbrew/bin/brew\", \"--version\"])",
+		"\"node\": user_shell(\"source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; node --version\")",
 		"\"partialFailures\"",
 	} {
 		if !strings.Contains(script, want) {

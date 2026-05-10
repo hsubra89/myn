@@ -162,7 +162,7 @@ func renderPersonalServerBootstrapScript(input personalServerBootstrapInput) str
 	fmt.Fprintln(&b, "#!/usr/bin/env bash")
 	fmt.Fprintln(&b, "set -Eeuo pipefail")
 	fmt.Fprintln(&b)
-	fmt.Fprintf(&b, "ME_USER=%s\n", shellQuote(input.User))
+	fmt.Fprintf(&b, "export ME_USER=%s\n", shellQuote(input.User))
 	fmt.Fprintf(&b, "ME_REMOTE_PROJECT_ROOT=%s\n", shellQuote(remoteRootPath))
 	fmt.Fprintln(&b, "ME_MARKER_DIR='/var/lib/me'")
 	fmt.Fprintln(&b, "ME_MARKER=\"$ME_MARKER_DIR/personal-server-bootstrap.json\"")
@@ -199,26 +199,36 @@ partial_failures = sys.argv[5:]
 
 def first_line(command):
     try:
-        output = subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, timeout=10)
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, timeout=20)
     except Exception:
         return ""
     return output.splitlines()[0] if output.splitlines() else ""
 
+me_user = os.environ.get("ME_USER", "")
+
+def user_command(command):
+    if not me_user:
+        return ["false"]
+    return ["sudo", "-H", "-u", me_user] + command
+
+def user_shell(command):
+    return user_command(["bash", "-lc", command])
+
 tool_commands = {
     "docker": ["docker", "--version"],
     "dockerCompose": ["docker", "compose", "version"],
-    "brew": ["/home/linuxbrew/.linuxbrew/bin/brew", "--version"],
+    "brew": user_command(["/home/linuxbrew/.linuxbrew/bin/brew", "--version"]),
     "tmux": ["/home/linuxbrew/.linuxbrew/bin/tmux", "-V"],
     "jq": ["/home/linuxbrew/.linuxbrew/bin/jq", "--version"],
     "git": ["/home/linuxbrew/.linuxbrew/bin/git", "--version"],
     "gh": ["/home/linuxbrew/.linuxbrew/bin/gh", "--version"],
     "rustup": ["/home/linuxbrew/.linuxbrew/bin/rustup", "--version"],
     "go": ["/home/linuxbrew/.linuxbrew/bin/go", "version"],
-    "nvm": ["bash", "-lc", "source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1 || true; nvm --version"],
-    "node": ["bash", "-lc", "source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1 || true; node --version"],
-    "npm": ["bash", "-lc", "source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1 || true; npm --version"],
-    "codex": ["bash", "-lc", "source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1 || true; codex --version"],
-    "claude": ["bash", "-lc", "source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1 || true; claude --version"],
+    "nvm": user_shell("source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; nvm --version"),
+    "node": user_shell("source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; node --version"),
+    "npm": user_shell("source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; npm --version"),
+    "codex": user_shell("source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; codex --version"),
+    "claude": user_shell("source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; claude --version"),
 }
 
 payload = {

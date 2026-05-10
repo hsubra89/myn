@@ -53,6 +53,7 @@ These issues are written locally instead of being published to an issue tracker.
    - **User stories covered**: 24, 40, 66-67, 77-78
 
 9. **Validate Personal Server provisioning against live Hetzner**
+   - **Status**: Done
    - **Type**: HITL
    - **Blocked by**: Issues 1-8
    - **User stories covered**: All
@@ -288,6 +289,8 @@ Make the full Personal Server provisioning path robust under cancellation and pa
 
 ## Issue 9: Validate Personal Server provisioning against live Hetzner
 
+**Status**: Done
+
 ## What to build
 
 Add and run a guarded live validation path for the completed Personal Server provisioning flow. The validation must read a Hetzner API key from `.env.local` as `HETZNER_API_KEY`, map it into the CLI's Hetzner Credentials path for the test run, create an isolated test Personal Server through the real CLI flow, wait for Personal Server Bootstrap completion, verify the server configuration and init setup commands on the live machine, and clean up the live test server afterwards.
@@ -296,24 +299,24 @@ This validation must not commit `.env.local`, print the API key, or rely on a de
 
 ## Acceptance criteria
 
-- [ ] `.env.local` is loaded only for live validation and `HETZNER_API_KEY` is never printed, committed, or copied into tracked files.
-- [ ] Live validation fails fast with a clear skip/error message when `.env.local` or `HETZNER_API_KEY` is missing.
-- [ ] Live validation uses isolated temporary `me` config, home, SSH identity, and server name values.
-- [ ] Live validation uses the real Hetzner API through the implemented CLI/provisioning path, not the fake Hetzner client.
-- [ ] Live validation creates a Personal Server with a test-specific name and the standard `managed_by=me` / `role=personal_server` labels.
-- [ ] Live validation verifies the selected Location and Server Type are accepted by Hetzner and the server is created with both IPv4 and assigned IPv6.
-- [ ] Live validation verifies the Hetzner SSH key and Personal Server Firewall behavior against live resources without deleting any pre-existing user-managed firewall or SSH key.
-- [ ] Live validation waits for Hetzner create actions, root SSH readiness, and the Personal Server Bootstrap completion marker.
-- [ ] Live validation verifies root SSH and Personal Server User SSH both work with the configured test SSH identity.
-- [ ] Live validation verifies the Personal Server User exists, uses Bash, belongs to `sudo` and `docker`, and has the configured remote project root owned by that user.
-- [ ] Live validation verifies Docker Engine and the compose plugin are installed and usable enough to report versions.
-- [ ] Live validation verifies Homebrew is installed for the Personal Server User and reports versions for `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, `node`, `npm`, Codex, and Claude Code when available.
-- [ ] Live validation verifies nvm defaulted the latest LTS Node.js for the Personal Server User.
-- [ ] Live validation verifies available local Git identity values were configured on the Personal Server User.
-- [ ] Live validation verifies hard bootstrap failures fail the live run and coding agent failures are reported as partial failures when they occur.
-- [ ] Live validation deletes the live test server at the end of the run, including on failure when a server was created.
-- [ ] Live validation reports any supporting resources it created and intentionally leaves behind according to product behavior.
-- [ ] Live validation documents the exact command to run, expected cost/risk, and cleanup behavior for maintainers.
+- [x] `.env.local` is loaded only for live validation and `HETZNER_API_KEY` is never printed, committed, or copied into tracked files.
+- [x] Live validation fails fast with a clear skip/error message when `.env.local` or `HETZNER_API_KEY` is missing.
+- [x] Live validation uses isolated temporary `me` config, home, SSH identity, and server name values.
+- [x] Live validation uses the real Hetzner API through the implemented CLI/provisioning path, not the fake Hetzner client.
+- [x] Live validation creates a Personal Server with a test-specific name and the standard `managed_by=me` / `role=personal_server` labels.
+- [x] Live validation verifies the selected Location and Server Type are accepted by Hetzner and the server is created with both IPv4 and assigned IPv6.
+- [x] Live validation verifies the Hetzner SSH key and Personal Server Firewall behavior against live resources without deleting any pre-existing user-managed firewall or SSH key.
+- [x] Live validation waits for Hetzner create actions, root SSH readiness, and the Personal Server Bootstrap completion marker.
+- [x] Live validation verifies root SSH and Personal Server User SSH both work with the configured test SSH identity.
+- [x] Live validation verifies the Personal Server User exists, uses Bash, belongs to `sudo` and `docker`, and has the configured remote project root owned by that user.
+- [x] Live validation verifies Docker Engine and the compose plugin are installed and usable enough to report versions.
+- [x] Live validation verifies Homebrew is installed for the Personal Server User and reports versions for `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, `node`, `npm`, Codex, and Claude Code when available.
+- [x] Live validation verifies nvm defaulted the latest LTS Node.js for the Personal Server User.
+- [x] Live validation verifies available local Git identity values were configured on the Personal Server User.
+- [x] Live validation verifies hard bootstrap failures fail the live run and coding agent failures are reported as partial failures when they occur.
+- [x] Live validation deletes the live test server at the end of the run, including on failure when a server was created.
+- [x] Live validation reports any supporting resources it created and intentionally leaves behind according to product behavior.
+- [x] Live validation documents the exact command to run, expected cost/risk, and cleanup behavior for maintainers.
 
 ## Blocked by
 

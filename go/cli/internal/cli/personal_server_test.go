@@ -732,6 +732,9 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if got, want := cloud.createdSSHKey.PublicKey, strings.TrimSpace(identity.PublicLine); got != want {
 		t.Fatalf("created SSH key public key mismatch: want %q, got %q", want, got)
 	}
+	if got, want := cloud.createdSSHKey.Name, "me-personal-server-"+strings.ReplaceAll(identity.HetznerFingerprint, ":", ""); got != want {
+		t.Fatalf("created SSH key name mismatch: want %q, got %q", want, got)
+	}
 	if got, want := cloud.sshKeyFingerprints, []string{identity.HetznerFingerprint}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH key fingerprint lookup mismatch: want %v, got %v", want, got)
 	}

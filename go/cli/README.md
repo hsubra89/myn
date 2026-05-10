@@ -119,6 +119,29 @@ just test
 go test ./...
 ```
 
+### Live Hetzner Validation
+
+The live Personal Server provisioning validation is opt-in because it creates a
+billable Hetzner Cloud server. Put a Read & Write token in the repository-root
+`.env.local` file as `HETZNER_API_KEY`; that file is ignored by git and the test
+does not print the token.
+
+```sh
+just live-hetzner
+# or
+ME_LIVE_HETZNER=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -timeout=30m -v
+```
+
+The test uses isolated temporary `me` config, home, known_hosts, and SSH identity
+values. It creates a uniquely named `me-live-*` server through the real
+configure provisioning path, waits for bootstrap, verifies SSH/user/tool setup,
+then deletes the test server on success or failure. It may create and intentionally
+leave behind the reusable `me-personal-server` firewall and matching SSH key,
+which is the product behavior for supporting resources. By default it chooses
+the cheapest eligible offered Server Type in the selected Location to limit
+prorated test cost; set `ME_LIVE_HETZNER_LOCATION` or
+`ME_LIVE_HETZNER_SERVER_TYPE` in `.env.local` to force a specific choice.
+
 ## Format
 
 ```sh

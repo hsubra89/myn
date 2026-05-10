@@ -797,7 +797,7 @@ func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreate
 	}
 
 	sshKey, err = client.CreateSSHKey(ctx, personalServerSSHKey{
-		Name:        personalServerSSHKeyName,
+		Name:        personalServerSSHKeyNameForFingerprint(fingerprint),
 		Fingerprint: fingerprint,
 		PublicKey:   identity.PublicKey.Line(),
 		Labels:      personalServerResourceLabels(),
@@ -806,6 +806,14 @@ func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreate
 		return personalServerSSHKey{}, fmt.Errorf("create Personal Server SSH Key: %w", err)
 	}
 	return sshKey, nil
+}
+
+func personalServerSSHKeyNameForFingerprint(fingerprint string) string {
+	fingerprint = strings.ReplaceAll(strings.TrimSpace(fingerprint), ":", "")
+	if fingerprint == "" {
+		return personalServerSSHKeyName
+	}
+	return personalServerSSHKeyName + "-" + fingerprint
 }
 
 func personalServerResourceLabels() map[string]string {

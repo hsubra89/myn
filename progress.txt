@@ -63,3 +63,11 @@
 - Kept cancellation before server creation from saving Personal Server Configuration.
 - Verified unavailable pricing still reports `Maximum monthly price: unavailable` and allows confirmed creation to proceed.
 - Verified with `go test ./...` and `go vet ./...` from `go/cli`.
+
+2026-05-10 - Completed Issue 9: Validate Personal Server provisioning against live Hetzner.
+
+- Added a guarded live validation harness that loads `.env.local` only when `ME_LIVE_HETZNER=1`, maps `HETZNER_API_KEY` into isolated Hetzner Credentials, and drives the real configure provisioning path with temporary config, home, SSH identity, known_hosts, and server name values.
+- Documented `just live-hetzner`, expected billable-resource risk, server cleanup, and intentionally retained supporting firewall/SSH-key behavior.
+- Live validation found and fixed two production issues: bootstrap marker version probes now run Homebrew, nvm, Node, npm, Codex, and Claude checks in the Personal Server User environment, and created Hetzner SSH key names are fingerprint-scoped to avoid name uniqueness conflicts while preserving reuse by fingerprint.
+- Verified the live path created a test Personal Server, waited for bootstrap, checked root/user SSH, user/group/root setup, remote project root ownership, Docker/Compose, Homebrew tools, nvm/Node default, and Git identity; the test server was deleted afterwards.
+- Verified with `go test ./...`, `go vet ./...`, and `ME_LIVE_HETZNER=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -timeout=30m -v` from `go/cli`.
