@@ -44,9 +44,14 @@ These issues are written locally instead of being published to an issue tracker.
    - **Blocked by**: Issues 6 and 7
    - **User stories covered**: 24, 40, 66-67, 77-78
 
-9. **Document Personal Server provisioning behavior**
-   - **Type**: AFK
+9. **Validate Personal Server provisioning against live Hetzner**
+   - **Type**: HITL
    - **Blocked by**: Issues 1-8
+   - **User stories covered**: All
+
+10. **Document Personal Server provisioning behavior**
+   - **Type**: AFK
+   - **Blocked by**: Issues 1-9
    - **User stories covered**: All
 
 ## Issue 1: Persist and gate Personal Server Configuration
@@ -259,7 +264,47 @@ Make the full Personal Server provisioning path robust under cancellation and pa
 - Issue 6
 - Issue 7
 
-## Issue 9: Document Personal Server provisioning behavior
+## Issue 9: Validate Personal Server provisioning against live Hetzner
+
+## What to build
+
+Add and run a guarded live validation path for the completed Personal Server provisioning flow. The validation must read a Hetzner API key from `.env.local` as `HETZNER_API_KEY`, map it into the CLI's Hetzner Credentials path for the test run, create an isolated test Personal Server through the real CLI flow, wait for Personal Server Bootstrap completion, verify the server configuration and init setup commands on the live machine, and clean up the live test server afterwards.
+
+This validation must not commit `.env.local`, print the API key, or rely on a developer's real `me` config. It should use an isolated temporary config/home/SSH identity and a unique test server name so the live test does not collide with an existing Personal Server.
+
+## Acceptance criteria
+
+- [ ] `.env.local` is loaded only for live validation and `HETZNER_API_KEY` is never printed, committed, or copied into tracked files.
+- [ ] Live validation fails fast with a clear skip/error message when `.env.local` or `HETZNER_API_KEY` is missing.
+- [ ] Live validation uses isolated temporary `me` config, home, SSH identity, and server name values.
+- [ ] Live validation uses the real Hetzner API through the implemented CLI/provisioning path, not the fake Hetzner client.
+- [ ] Live validation creates a Personal Server with a test-specific name and the standard `managed_by=me` / `role=personal_server` labels.
+- [ ] Live validation verifies the selected Location and Server Type are accepted by Hetzner and the server is created with both IPv4 and assigned IPv6.
+- [ ] Live validation verifies the Hetzner SSH key and Personal Server Firewall behavior against live resources without deleting any pre-existing user-managed firewall or SSH key.
+- [ ] Live validation waits for Hetzner create actions, root SSH readiness, and the Personal Server Bootstrap completion marker.
+- [ ] Live validation verifies root SSH and Personal Server User SSH both work with the configured test SSH identity.
+- [ ] Live validation verifies the Personal Server User exists, uses Bash, belongs to `sudo` and `docker`, and has the configured remote project root owned by that user.
+- [ ] Live validation verifies Docker Engine and the compose plugin are installed and usable enough to report versions.
+- [ ] Live validation verifies Homebrew is installed for the Personal Server User and reports versions for `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, `node`, `npm`, Codex, and Claude Code when available.
+- [ ] Live validation verifies nvm defaulted the latest LTS Node.js for the Personal Server User.
+- [ ] Live validation verifies available local Git identity values were configured on the Personal Server User.
+- [ ] Live validation verifies hard bootstrap failures fail the live run and coding agent failures are reported as partial failures when they occur.
+- [ ] Live validation deletes the live test server at the end of the run, including on failure when a server was created.
+- [ ] Live validation reports any supporting resources it created and intentionally leaves behind according to product behavior.
+- [ ] Live validation documents the exact command to run, expected cost/risk, and cleanup behavior for maintainers.
+
+## Blocked by
+
+- Issue 1
+- Issue 2
+- Issue 3
+- Issue 4
+- Issue 5
+- Issue 6
+- Issue 7
+- Issue 8
+
+## Issue 10: Document Personal Server provisioning behavior
 
 ## What to build
 
@@ -288,3 +333,4 @@ Update user-facing development documentation for the new `me configure` Personal
 - Issue 6
 - Issue 7
 - Issue 8
+- Issue 9
