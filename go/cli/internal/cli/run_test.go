@@ -43,20 +43,23 @@ func TestRunStdioValidatesIdleAfterBeforeStartingCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runnerCalled := false
-			err := runRunCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, runOptions{
-				stdio:         true,
-				idleAfterText: tt.idleAfter,
-			}, []string{"echo"}, runDeps{
+			executor := stdioLeaseExecutor{
 				stdinIsTerminal: func(io.Reader) bool {
 					return true
 				},
 				stdoutIsTerminal: func(io.Writer) bool {
 					return true
 				},
-				runStdio: func(stdioRunRequest) error {
+				runExecution: func(stdioLeaseExecution) error {
 					runnerCalled = true
 					return nil
 				},
+			}
+			err := executor.Run(stdioLeaseExecutionRequest{
+				Command:       []string{"echo"},
+				IdleAfterText: tt.idleAfter,
+				Stdin:         strings.NewReader(""),
+				Stdout:        &bytes.Buffer{},
 			})
 
 			if err == nil {
@@ -84,22 +87,23 @@ func TestRunStdioDefaultsAndAcceptsIdleAfter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got stdioRunRequest
-			err := runRunCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, runOptions{
-				stdio:         true,
-				idleAfterText: tt.idleAfter,
-			}, []string{"echo", "hello"}, runDeps{
+			var got stdioLeaseExecution
+			executor := stdioLeaseExecutor{
 				stdinIsTerminal: func(io.Reader) bool {
 					return true
 				},
 				stdoutIsTerminal: func(io.Writer) bool {
 					return true
 				},
-				runStdio: func(req stdioRunRequest) error {
+				runExecution: func(req stdioLeaseExecution) error {
 					got = req
 					return nil
 				},
-			})
+			}
+			err := runRunCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, runOptions{
+				stdio:         true,
+				idleAfterText: tt.idleAfter,
+			}, []string{"echo", "hello"}, runDeps{stdioExecutor: executor})
 
 			if err != nil {
 				t.Fatalf("run stdio command: %v", err)
@@ -116,19 +120,21 @@ func TestRunStdioDefaultsAndAcceptsIdleAfter(t *testing.T) {
 
 func TestRunStdioRejectsMissingCommandBeforeStarting(t *testing.T) {
 	runnerCalled := false
-	err := runRunCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, runOptions{
-		stdio: true,
-	}, nil, runDeps{
+	executor := stdioLeaseExecutor{
 		stdinIsTerminal: func(io.Reader) bool {
 			return true
 		},
 		stdoutIsTerminal: func(io.Writer) bool {
 			return true
 		},
-		runStdio: func(stdioRunRequest) error {
+		runExecution: func(stdioLeaseExecution) error {
 			runnerCalled = true
 			return nil
 		},
+	}
+	err := executor.Run(stdioLeaseExecutionRequest{
+		Stdin:  strings.NewReader(""),
+		Stdout: &bytes.Buffer{},
 	})
 
 	if err == nil {
@@ -156,19 +162,22 @@ func TestRunStdioRequiresTerminalBackedStdinAndStdout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runnerCalled := false
-			err := runRunCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, runOptions{
-				stdio: true,
-			}, []string{"echo"}, runDeps{
+			executor := stdioLeaseExecutor{
 				stdinIsTerminal: func(io.Reader) bool {
 					return tt.stdinTerminal
 				},
 				stdoutIsTerminal: func(io.Writer) bool {
 					return tt.stdoutTerminal
 				},
-				runStdio: func(stdioRunRequest) error {
+				runExecution: func(stdioLeaseExecution) error {
 					runnerCalled = true
 					return nil
 				},
+			}
+			err := executor.Run(stdioLeaseExecutionRequest{
+				Command: []string{"echo"},
+				Stdin:   strings.NewReader(""),
+				Stdout:  &bytes.Buffer{},
 			})
 
 			if err == nil {
@@ -188,11 +197,10 @@ func TestRunStdioCommandProxiesChildOutputThroughPTY(t *testing.T) {
 	skipPTYIntegrationIfUnsupported(t)
 
 	var out bytes.Buffer
-	err := runStdioCommand(stdioRunRequest{
+	err := runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
 		Command: []string{"sh", "-c", "printf stdout; printf stderr >&2"},
 		Stdin:   strings.NewReader(""),
 		Stdout:  &out,
-		Stderr:  &bytes.Buffer{},
 	})
 
 	if err != nil {
@@ -212,12 +220,11 @@ func TestRunStdioCommandDrainsPTYOutputAfterChildExit(t *testing.T) {
 	defer out.Release()
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "printf stdout; while [ ! -f \"$1\" ]; do sleep 0.01; done; printf stderr >&2", "sh", continuePath},
-			IdleAfter: time.Second,
-			Stdin:     strings.NewReader(""),
-			Stdout:    out,
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "printf stdout; while [ ! -f \"$1\" ]; do sleep 0.01; done; printf stderr >&2", "sh", continuePath},
+			IdleAfterText: time.Second.String(),
+			Stdin:         strings.NewReader(""),
+			Stdout:        out,
 		})
 	}()
 
@@ -248,11 +255,10 @@ func TestRunStdioCommandProxiesInputThroughPTY(t *testing.T) {
 	skipPTYIntegrationIfUnsupported(t)
 
 	var out bytes.Buffer
-	err := runStdioCommand(stdioRunRequest{
+	err := runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
 		Command: []string{"sh", "-c", "stty -echo; IFS= read -r line; printf 'got:%s' \"$line\""},
 		Stdin:   strings.NewReader("hello\n"),
 		Stdout:  &out,
-		Stderr:  &bytes.Buffer{},
 	})
 
 	if err != nil {
@@ -266,11 +272,10 @@ func TestRunStdioCommandProxiesInputThroughPTY(t *testing.T) {
 func TestRunStdioCommandReturnsWrappedExitStatus(t *testing.T) {
 	skipPTYIntegrationIfUnsupported(t)
 
-	err := runStdioCommand(stdioRunRequest{
+	err := runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
 		Command: []string{"sh", "-c", "exit 7"},
 		Stdin:   strings.NewReader(""),
 		Stdout:  &bytes.Buffer{},
-		Stderr:  &bytes.Buffer{},
 	})
 
 	code, ok := CommandExitCode(err)
@@ -285,11 +290,10 @@ func TestRunStdioCommandReturnsWrappedExitStatus(t *testing.T) {
 func TestRunStdioCommandMapsSignalExitStatus(t *testing.T) {
 	skipPTYIntegrationIfUnsupported(t)
 
-	err := runStdioCommand(stdioRunRequest{
+	err := runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
 		Command: []string{"sh", "-c", "kill -TERM $$"},
 		Stdin:   strings.NewReader(""),
 		Stdout:  &bytes.Buffer{},
-		Stderr:  &bytes.Buffer{},
 	})
 
 	code, ok := CommandExitCode(err)
@@ -314,12 +318,11 @@ func TestRunStdioCommandCreatesStdioLeaseThenRemovesOnExit(t *testing.T) {
 	var out bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "printf ready; sleep 0.4"},
-			IdleAfter: 5 * time.Second,
-			Stdin:     strings.NewReader(""),
-			Stdout:    &out,
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "printf ready; sleep 0.4"},
+			IdleAfterText: (5 * time.Second).String(),
+			Stdin:         strings.NewReader(""),
+			Stdout:        &out,
 		})
 	}()
 
@@ -397,12 +400,11 @@ func TestRunStdioCommandRefreshesLeaseHeartbeat(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "sleep 0.8"},
-			IdleAfter: 300 * time.Millisecond,
-			Stdin:     strings.NewReader(""),
-			Stdout:    &bytes.Buffer{},
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "sleep 0.8"},
+			IdleAfterText: (300 * time.Millisecond).String(),
+			Stdin:         strings.NewReader(""),
+			Stdout:        &bytes.Buffer{},
 		})
 	}()
 
@@ -431,12 +433,11 @@ func TestRunStdioCommandRecordsOutputActivityAsActiveLease(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "printf output-activity; sleep 1"},
-			IdleAfter: 5 * time.Second,
-			Stdin:     strings.NewReader(""),
-			Stdout:    &bytes.Buffer{},
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "printf output-activity; sleep 1"},
+			IdleAfterText: (5 * time.Second).String(),
+			Stdin:         strings.NewReader(""),
+			Stdout:        &bytes.Buffer{},
 		})
 	}()
 
@@ -481,12 +482,11 @@ func TestRunStdioCommandRecordsInputActivityAsActiveLease(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "stty -echo; : > \"$1\"; IFS= read -r line; sleep 1", "sh", readyPath},
-			IdleAfter: 5 * time.Second,
-			Stdin:     stdin,
-			Stdout:    &bytes.Buffer{},
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "stty -echo; : > \"$1\"; IFS= read -r line; sleep 1", "sh", readyPath},
+			IdleAfterText: (5 * time.Second).String(),
+			Stdin:         stdin,
+			Stdout:        &bytes.Buffer{},
 		})
 	}()
 
@@ -533,12 +533,11 @@ func TestRunStdioCommandReportsQuietLeaseIdleAfterIdleWindow(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "printf once; sleep 1"},
-			IdleAfter: 200 * time.Millisecond,
-			Stdin:     strings.NewReader(""),
-			Stdout:    &bytes.Buffer{},
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "printf once; sleep 1"},
+			IdleAfterText: (200 * time.Millisecond).String(),
+			Stdin:         strings.NewReader(""),
+			Stdout:        &bytes.Buffer{},
 		})
 	}()
 
@@ -575,6 +574,18 @@ func skipPTYIntegrationIfUnsupported(t *testing.T) {
 		t.Skip("sh is required for PTY integration tests")
 	}
 	t.Setenv("ME_LEASE_DIR", t.TempDir())
+}
+
+func runTestStdioLeaseExecution(t *testing.T, req stdioLeaseExecutionRequest) error {
+	t.Helper()
+	return stdioLeaseExecutor{
+		stdinIsTerminal: func(io.Reader) bool {
+			return true
+		},
+		stdoutIsTerminal: func(io.Writer) bool {
+			return true
+		},
+	}.Run(req)
 }
 
 func readStdioLeaseFile(t *testing.T, path string) idleLease {

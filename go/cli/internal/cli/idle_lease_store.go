@@ -85,7 +85,7 @@ type stdioLeaseSession struct {
 	done    chan error
 }
 
-func newStdioLeaseSession(req stdioRunRequest) (*stdioLeaseSession, error) {
+func newStdioLeaseSession(req stdioLeaseExecution) (*stdioLeaseSession, error) {
 	store, err := newIdleLeaseFileStore(os.Getenv)
 	if err != nil {
 		return nil, err

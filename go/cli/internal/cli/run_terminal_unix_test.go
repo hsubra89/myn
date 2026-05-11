@@ -29,12 +29,11 @@ func TestRunStdioCommandPassesCtrlCThroughPTY(t *testing.T) {
 	out := &lockedBuffer{}
 	done := make(chan error, 1)
 	go func() {
-		done <- runStdioCommand(stdioRunRequest{
-			Command:   []string{"sh", "-c", "trap 'printf got-int; exit 42' INT; printf ready; sleep 2; printf no-int"},
-			IdleAfter: time.Second,
-			Stdin:     userTTY,
-			Stdout:    out,
-			Stderr:    &bytes.Buffer{},
+		done <- runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+			Command:       []string{"sh", "-c", "trap 'printf got-int; exit 42' INT; printf ready; sleep 2; printf no-int"},
+			IdleAfterText: time.Second.String(),
+			Stdin:         userTTY,
+			Stdout:        out,
 		})
 	}()
 
@@ -83,12 +82,11 @@ func TestRunStdioCommandRestoresTerminalModeAfterChildExit(t *testing.T) {
 				t.Fatalf("get terminal state before run: %v", err)
 			}
 
-			err = runStdioCommand(stdioRunRequest{
-				Command:   tt.command,
-				IdleAfter: time.Second,
-				Stdin:     userTTY,
-				Stdout:    &bytes.Buffer{},
-				Stderr:    &bytes.Buffer{},
+			err = runTestStdioLeaseExecution(t, stdioLeaseExecutionRequest{
+				Command:       tt.command,
+				IdleAfterText: time.Second.String(),
+				Stdin:         userTTY,
+				Stdout:        &bytes.Buffer{},
 			})
 			if tt.wantCode == 0 && err != nil {
 				t.Fatalf("run stdio command: %v", err)
