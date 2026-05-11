@@ -21,6 +21,9 @@ func main() {
 	})
 
 	if err := root.Execute(); err != nil {
+		if code, ok := cli.CommandExitCode(err); ok {
+			os.Exit(code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

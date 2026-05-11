@@ -5,3 +5,7 @@ Verification: `go test ./...` from `go/cli` passed.
 2026-05-11T07:36:02Z - Completed Issue 2, "Render Human-Readable Idle Lease Status".
 Implemented default `me idle status` output using the same evaluated lease report as `--json`, including active/idle/stale summary counts, lease directory, per-lease details, stale reasons, empty-directory output, and read-only stale lease handling.
 Verification: `go test ./...` from `go/cli` passed.
+
+2026-05-11T07:45:31Z - Completed Issue 3, "Run Stdio Commands Under a PTY".
+Implemented `me run --stdio` command wiring with `--idle-after` validation, clear unsupported non-stdio behavior, terminal-backed stdin/stdout checks, PTY startup via `github.com/creack/pty`, input/output proxying, child exit-code passthrough, and conventional signal exit-code mapping.
+Verification: `go test ./...` from `go/cli` passed; Windows and Darwin test packages cross-compiled.

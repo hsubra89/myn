@@ -15,14 +15,16 @@ type BuildInfo struct {
 
 func NewRootCommand(info BuildInfo) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "me",
-		Short:        "Personal command-line tools",
-		SilenceUsage: true,
+		Use:           "me",
+		Short:         "Personal command-line tools",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	cmd.AddCommand(newAuthCommand())
 	cmd.AddCommand(newConfigureCommand())
 	cmd.AddCommand(newIdleCommand())
+	cmd.AddCommand(newRunCommand())
 	cmd.AddCommand(newVersionCommand(info))
 
 	return cmd

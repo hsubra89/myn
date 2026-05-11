@@ -20,14 +20,14 @@ Default label: `ready-for-agent`
 
 3. **Title**: Run stdio commands under a PTY
    **Type**: AFK
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: None
    **User stories covered**: 7-10, 13, 33-35, 37
 
 4. **Title**: Create and clean up Stdio Lease files during a PTY run
    **Type**: AFK
-   **Status**: Blocked
-   **Blocked by**: Issues 1 and 3
+   **Status**: Ready
+   **Blocked by**: None
    **User stories covered**: 14, 16-21, 28, 30, 32, 35, 37
 
 5. **Title**: Renew Stdio Leases from terminal input and output
@@ -38,8 +38,8 @@ Default label: `ready-for-agent`
 
 6. **Title**: Preserve interactive terminal controls for stdio sessions
    **Type**: AFK
-   **Status**: Blocked
-   **Blocked by**: Issue 3
+   **Status**: Ready
+   **Blocked by**: None
    **User stories covered**: 10-12, 37
 
 ## Issue 1: Report Idle Lease State From JSON Lease Files
@@ -115,7 +115,9 @@ This slice must remain read-only: status may inspect and report lease files, but
 
 Type: AFK
 
-Label: `ready-for-agent`
+Label: `done`
+
+Status: Done
 
 ### What to build
 
@@ -125,30 +127,32 @@ This slice establishes transparent PTY wrapper behavior without writing Stdio Le
 
 ### Acceptance criteria
 
-- [ ] `me run --stdio -- <command...>` starts the command under a PTY on supported Unix-like platforms.
-- [ ] The PTY implementation uses `github.com/creack/pty`.
-- [ ] Unsupported platforms fail clearly rather than falling back to plain pipes.
-- [ ] `me run -- <command...>` without `--stdio` fails clearly because non-stdio command leases are not implemented yet.
-- [ ] `--idle-after` defaults to `30m`.
-- [ ] Valid Go-style duration values are accepted for `--idle-after`.
-- [ ] Zero, negative, and malformed idle windows are rejected before the child command starts.
-- [ ] Missing command arguments are rejected before child startup.
-- [ ] Non-terminal stdin or stdout is rejected before child startup.
-- [ ] Child stdout and stderr output reaches the user's terminal.
-- [ ] User input reaches the child process through the PTY.
-- [ ] The wrapper exits with the wrapped command's exit status when possible.
-- [ ] A child that exits due to signal uses conventional shell-style signal mapping where possible.
-- [ ] Tests cover flag validation, unsupported non-stdio run mode, terminal requirement, output proxying, input proxying, and exit-status passthrough.
+- [x] `me run --stdio -- <command...>` starts the command under a PTY on supported Unix-like platforms.
+- [x] The PTY implementation uses `github.com/creack/pty`.
+- [x] Unsupported platforms fail clearly rather than falling back to plain pipes.
+- [x] `me run -- <command...>` without `--stdio` fails clearly because non-stdio command leases are not implemented yet.
+- [x] `--idle-after` defaults to `30m`.
+- [x] Valid Go-style duration values are accepted for `--idle-after`.
+- [x] Zero, negative, and malformed idle windows are rejected before the child command starts.
+- [x] Missing command arguments are rejected before child startup.
+- [x] Non-terminal stdin or stdout is rejected before child startup.
+- [x] Child stdout and stderr output reaches the user's terminal.
+- [x] User input reaches the child process through the PTY.
+- [x] The wrapper exits with the wrapped command's exit status when possible.
+- [x] A child that exits due to signal uses conventional shell-style signal mapping where possible.
+- [x] Tests cover flag validation, unsupported non-stdio run mode, terminal requirement, output proxying, input proxying, and exit-status passthrough.
 
 ### Blocked by
 
-None - can start immediately.
+Completed.
 
 ## Issue 4: Create and Clean Up Stdio Lease Files During a PTY Run
 
 Type: AFK
 
 Label: `ready-for-agent`
+
+Status: Ready
 
 ### What to build
 
@@ -174,8 +178,7 @@ The command does not need to renew from terminal input or output in this slice b
 
 ### Blocked by
 
-- Issue 1
-- Issue 3
+None - can start immediately.
 
 ## Issue 5: Renew Stdio Leases From Terminal Input and Output
 
@@ -216,6 +219,8 @@ Type: AFK
 
 Label: `ready-for-agent`
 
+Status: Ready
+
 ### What to build
 
 Finish the terminal-fidelity behavior promised by PTY-backed Stdio Leases. `me run --stdio` should behave like a transparent interactive wrapper for common terminal controls: Ctrl-C should reach the child process, the wrapper should not treat Ctrl-C as its own cancellation request while the child is running, and terminal resize events should be forwarded to the child PTY.
@@ -236,4 +241,4 @@ This slice is about preserving interactive behavior for shells, Codex, Claude Co
 
 ### Blocked by
 
-- Issue 3
+None - can start immediately.
