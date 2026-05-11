@@ -49,7 +49,11 @@ func startStdioResizeForwarding(source *os.File, target *os.File) (func(), error
 }
 
 func startStdioResizeForwardingWithEvents(source *os.File, target *os.File, events <-chan os.Signal, stopNotify func()) (func(), error) {
-	if err := copyTerminalSize(source, target); err != nil {
+	return startStdioResizeForwardingWithEventsAndCopy(source, target, events, stopNotify, copyTerminalSize)
+}
+
+func startStdioResizeForwardingWithEventsAndCopy(source *os.File, target *os.File, events <-chan os.Signal, stopNotify func(), copySize func(*os.File, *os.File) error) (func(), error) {
+	if err := copySize(source, target); err != nil {
 		if stopNotify != nil {
 			stopNotify()
 		}
@@ -57,14 +61,22 @@ func startStdioResizeForwardingWithEvents(source *os.File, target *os.File, even
 	}
 
 	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
 			select {
 			case _, ok := <-events:
 				if !ok {
 					return
 				}
-				_ = copyTerminalSize(source, target)
+				_ = copySize(source, target)
 			case <-done:
 				return
 			}
@@ -78,6 +90,7 @@ func startStdioResizeForwardingWithEvents(source *os.File, target *os.File, even
 				stopNotify()
 			}
 			close(done)
+			<-stopped
 		})
 	}, nil
 }

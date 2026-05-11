@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/x/term"
@@ -130,18 +131,17 @@ func (executor stdioLeaseExecutor) runStdioLeaseExecution(req stdioLeaseExecutio
 		outputDone <- err
 	}()
 
+	inputWriter := newStoppableStdioActivityWriter(ptmx, leaseSession.recordInput, executor.stdioNow)
 	go func() {
-		_, _ = io.Copy(stdioActivityWriter{
-			dst:    ptmx,
-			record: leaseSession.recordInput,
-			now:    executor.stdioNow,
-		}, req.Stdin)
+		_, _ = io.Copy(inputWriter, req.Stdin)
 	}()
 
 	waitErr := child.Wait()
+	inputWriter.stopAccepting()
+	restoreErr := restoreTerminal()
 	outputErr := waitForStdioPTYOutput(ptmx, outputDone)
 	_ = ptmx.Close()
-	restoreErr := restoreTerminal()
+	inputWriter.wait()
 	cleanupErr := leaseSession.close()
 
 	if waitErr != nil {
@@ -243,6 +243,66 @@ func (writer stdioActivityWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+type stoppableStdioActivityWriter struct {
+	writer  stdioActivityWriter
+	mu      sync.Mutex
+	cond    *sync.Cond
+	stopped bool
+	active  int
+}
+
+func newStoppableStdioActivityWriter(dst io.Writer, record func(time.Time) error, now func() time.Time) *stoppableStdioActivityWriter {
+	writer := &stoppableStdioActivityWriter{
+		writer: stdioActivityWriter{
+			dst:    dst,
+			record: record,
+			now:    now,
+		},
+	}
+	writer.cond = sync.NewCond(&writer.mu)
+	return writer
+}
+
+func (writer *stoppableStdioActivityWriter) Write(p []byte) (int, error) {
+	writer.mu.Lock()
+	if writer.stopped {
+		writer.mu.Unlock()
+		return 0, os.ErrClosed
+	}
+	writer.active++
+	writer.mu.Unlock()
+
+	n, err := writer.writer.Write(p)
+
+	writer.mu.Lock()
+	writer.active--
+	if writer.active == 0 {
+		writer.cond.Broadcast()
+	}
+	writer.mu.Unlock()
+
+	return n, err
+}
+
+func (writer *stoppableStdioActivityWriter) stop() {
+	writer.stopAccepting()
+	writer.wait()
+}
+
+func (writer *stoppableStdioActivityWriter) stopAccepting() {
+	writer.mu.Lock()
+	writer.stopped = true
+	writer.mu.Unlock()
+}
+
+func (writer *stoppableStdioActivityWriter) wait() {
+	writer.mu.Lock()
+	for writer.active > 0 {
+		writer.cond.Wait()
+	}
+	writer.mu.Unlock()
 }
 
 type commandExitError struct {

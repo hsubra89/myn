@@ -145,6 +145,53 @@ func TestStdioResizeForwardingCopiesInitialAndChangedTerminalSize(t *testing.T) 
 	}
 }
 
+func TestStdioResizeForwardingStopWaitsForInFlightResize(t *testing.T) {
+	events := make(chan os.Signal, 1)
+	copyStarted := make(chan struct{})
+	releaseCopy := make(chan struct{})
+
+	var mu sync.Mutex
+	copyCalls := 0
+	stop, err := startStdioResizeForwardingWithEventsAndCopy(nil, nil, events, nil, func(*os.File, *os.File) error {
+		mu.Lock()
+		copyCalls++
+		call := copyCalls
+		mu.Unlock()
+
+		if call == 1 {
+			return nil
+		}
+		close(copyStarted)
+		<-releaseCopy
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("start resize forwarding: %v", err)
+	}
+
+	events <- os.Interrupt
+	<-copyStarted
+
+	stopDone := make(chan struct{})
+	go func() {
+		stop()
+		close(stopDone)
+	}()
+
+	select {
+	case <-stopDone:
+		t.Fatal("stop returned before in-flight resize finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseCopy)
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resize forwarding to stop")
+	}
+}
+
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
