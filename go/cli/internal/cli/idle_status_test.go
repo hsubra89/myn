@@ -272,6 +272,54 @@ func TestIdleStatusJSONReportsExpiredAndOldHeartbeatLeasesAsStale(t *testing.T) 
 	}
 }
 
+func TestIdleStatusJSONReportsWrittenStdioLeaseWithDeadRootAsStale(t *testing.T) {
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+	now := time.Now().UTC()
+
+	store, err := newIdleLeaseFileStore(os.Getenv)
+	if err != nil {
+		t.Fatalf("create lease store: %v", err)
+	}
+	lastOutputAt := now.Add(-10 * time.Second)
+	if err := store.write(idleLease{
+		Kind:             stdioLeaseKind,
+		ID:               "stdio-leftover",
+		RootPID:          99999999,
+		ProcessGroup:     99999999,
+		User:             "harish",
+		WorkingDirectory: "/home/harish/projects/me",
+		Command:          "codex",
+		Interactive:      true,
+		StartedAt:        now.Add(-5 * time.Minute),
+		UpdatedAt:        now.Add(-10 * time.Second),
+		LastOutputAt:     &lastOutputAt,
+		IdleAfter:        idleLeaseDuration(30 * time.Minute),
+		ExpiresAt:        now.Add(30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("write leftover lease: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runIdleStatus(&out, idleStatusOptions{json: true}, idleStatusDeps{
+		env: os.Getenv,
+		now: func() time.Time {
+			return now
+		},
+		processAlive: func(int) bool {
+			return false
+		},
+	}); err != nil {
+		t.Fatalf("run idle status: %v", err)
+	}
+
+	report := decodeIdleStatusReport(t, out.Bytes())
+	leftover := assertReportedLease(t, report, "stdio-leftover", "stale", "codex", "/home/harish/projects/me")
+	if !strings.Contains(leftover.Reason, "root process is not running") {
+		t.Fatalf("leftover reason mismatch: %q", leftover.Reason)
+	}
+}
+
 func TestIdleStatusJSONReturnsOperationalDirectoryFailures(t *testing.T) {
 	leasePath := filepath.Join(t.TempDir(), "leases")
 	if err := os.WriteFile(leasePath, []byte("not a directory"), 0o644); err != nil {

@@ -26,14 +26,14 @@ Default label: `ready-for-agent`
 
 4. **Title**: Create and clean up Stdio Lease files during a PTY run
    **Type**: AFK
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: None
    **User stories covered**: 14, 16-21, 28, 30, 32, 35, 37
 
 5. **Title**: Renew Stdio Leases from terminal input and output
    **Type**: AFK
-   **Status**: Blocked
-   **Blocked by**: Issues 1, 2, and 4
+   **Status**: Ready
+   **Blocked by**: None - Issues 1, 2, and 4 are complete
    **User stories covered**: 1-6, 22-25, 30-31, 38
 
 6. **Title**: Preserve interactive terminal controls for stdio sessions
@@ -150,9 +150,9 @@ Completed.
 
 Type: AFK
 
-Label: `ready-for-agent`
+Label: `done`
 
-Status: Ready
+Status: Done
 
 ### What to build
 
@@ -162,19 +162,19 @@ The command does not need to renew from terminal input or output in this slice b
 
 ### Acceptance criteria
 
-- [ ] Starting `me run --stdio` creates one Stdio Lease file in the resolved lease directory.
-- [ ] Lease file names use generated lease IDs with a `.json` extension.
-- [ ] Lease files are written with `0644` permissions.
-- [ ] Lease files contain no full command arguments.
-- [ ] The `command` field stores only `argv[0]`.
-- [ ] The lease records `kind`, `id`, `rootPid`, `processGroup`, `user`, `workingDirectory`, `command`, `interactive`, `startedAt`, `updatedAt`, `idleAfter`, and `expiresAt`.
-- [ ] `expiresAt` is refreshed as a crash-safety TTL, not used as the idle deadline.
-- [ ] Lease writes are atomic using a temporary file in the same directory and rename.
-- [ ] Heartbeat flushes update `updatedAt` on a bounded cadence.
-- [ ] A meaningful state change flushes promptly.
-- [ ] Normal wrapper exit removes the lease file.
-- [ ] If the wrapper or child dies abnormally and leaves a lease behind, `me idle status --json` reports it as stale.
-- [ ] Tests verify lease creation, metadata, atomic write behavior, heartbeat update, final cleanup, and stale leftover reporting.
+- [x] Starting `me run --stdio` creates one Stdio Lease file in the resolved lease directory.
+- [x] Lease file names use generated lease IDs with a `.json` extension.
+- [x] Lease files are written with `0644` permissions.
+- [x] Lease files contain no full command arguments.
+- [x] The `command` field stores only `argv[0]`.
+- [x] The lease records `kind`, `id`, `rootPid`, `processGroup`, `user`, `workingDirectory`, `command`, `interactive`, `startedAt`, `updatedAt`, `idleAfter`, and `expiresAt`.
+- [x] `expiresAt` is refreshed as a crash-safety TTL, not used as the idle deadline.
+- [x] Lease writes are atomic using a temporary file in the same directory and rename.
+- [x] Heartbeat flushes update `updatedAt` on a bounded cadence.
+- [x] A meaningful state change flushes promptly.
+- [x] Normal wrapper exit removes the lease file.
+- [x] If the wrapper or child dies abnormally and leaves a lease behind, `me idle status --json` reports it as stale.
+- [x] Tests verify lease creation, metadata, atomic write behavior, heartbeat update, final cleanup, and stale leftover reporting.
 
 ### Blocked by
 
@@ -185,6 +185,8 @@ None - can start immediately.
 Type: AFK
 
 Label: `ready-for-agent`
+
+Status: Ready
 
 ### What to build
 
@@ -209,9 +211,7 @@ After this slice, `me idle status` and `me idle status --json` should show a run
 
 ### Blocked by
 
-- Issue 1
-- Issue 2
-- Issue 4
+None - Issues 1, 2, and 4 are complete.
 
 ## Issue 6: Preserve Interactive Terminal Controls For Stdio Sessions
 

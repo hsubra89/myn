@@ -113,6 +113,14 @@ func runStdioCommand(req stdioRunRequest) error {
 	if len(req.Command) == 0 {
 		return fmt.Errorf("missing command after --")
 	}
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("stdio PTY is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	leaseSession, err := newStdioLeaseSession(req)
+	if err != nil {
+		return err
+	}
 
 	child := exec.Command(req.Command[0], req.Command[1:]...)
 	ptmx, err := pty.Start(child)
@@ -121,6 +129,13 @@ func runStdioCommand(req stdioRunRequest) error {
 			return fmt.Errorf("stdio PTY is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
 		}
 		return fmt.Errorf("start stdio PTY command %q: %w", req.Command[0], err)
+	}
+
+	if err := leaseSession.start(child.Process.Pid, stdioProcessGroup(child.Process.Pid)); err != nil {
+		_ = ptmx.Close()
+		_ = child.Process.Kill()
+		_ = child.Wait()
+		return fmt.Errorf("create stdio idle lease: %w", err)
 	}
 
 	outputDone := make(chan error, 1)
@@ -139,6 +154,7 @@ func runStdioCommand(req stdioRunRequest) error {
 	waitErr := child.Wait()
 	_ = ptmx.Close()
 	outputErr := <-outputDone
+	cleanupErr := leaseSession.close()
 
 	if waitErr != nil {
 		var exitErr *exec.ExitError
@@ -149,6 +165,9 @@ func runStdioCommand(req stdioRunRequest) error {
 	}
 	if outputErr != nil {
 		return fmt.Errorf("copy PTY output: %w", outputErr)
+	}
+	if cleanupErr != nil {
+		return cleanupErr
 	}
 	return nil
 }

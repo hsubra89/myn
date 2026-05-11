@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -257,6 +260,128 @@ func TestRunStdioCommandMapsSignalExitStatus(t *testing.T) {
 	}
 }
 
+func TestRunStdioCommandCreatesStdioLeaseThenRemovesOnExit(t *testing.T) {
+	skipPTYIntegrationIfUnsupported(t)
+
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- runStdioCommand(stdioRunRequest{
+			Command:   []string{"sh", "-c", "printf ready; sleep 0.4"},
+			IdleAfter: 5 * time.Second,
+			Stdin:     strings.NewReader(""),
+			Stdout:    &out,
+			Stderr:    &bytes.Buffer{},
+		})
+	}()
+
+	leasePath := waitForSingleLeaseFile(t, leaseDir, done)
+	if filepath.Ext(leasePath) != ".json" {
+		t.Fatalf("lease path should use .json extension: %s", leasePath)
+	}
+	info, err := os.Stat(leasePath)
+	if err != nil {
+		t.Fatalf("stat lease file: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o644); got != want {
+		t.Fatalf("lease file permissions mismatch: want %s, got %s", want, got)
+	}
+
+	data, err := os.ReadFile(leasePath)
+	if err != nil {
+		t.Fatalf("read lease file: %v", err)
+	}
+	var lease idleLease
+	if err := json.Unmarshal(data, &lease); err != nil {
+		t.Fatalf("decode lease JSON %s: %v", data, err)
+	}
+	if lease.ID == "" || filepath.Base(leasePath) != lease.ID+".json" {
+		t.Fatalf("lease ID should match file name, id=%q path=%s", lease.ID, leasePath)
+	}
+	if lease.Kind != "stdio" {
+		t.Fatalf("lease kind mismatch: %q", lease.Kind)
+	}
+	if lease.RootPID <= 0 {
+		t.Fatalf("lease rootPid should be recorded, got %d", lease.RootPID)
+	}
+	if lease.ProcessGroup <= 0 {
+		t.Fatalf("lease processGroup should be recorded, got %d", lease.ProcessGroup)
+	}
+	if lease.User == "" {
+		t.Fatal("lease user should be recorded")
+	}
+	if lease.WorkingDirectory != workingDirectory {
+		t.Fatalf("working directory mismatch: want %q, got %q", workingDirectory, lease.WorkingDirectory)
+	}
+	if lease.Command != "sh" {
+		t.Fatalf("command should contain only argv[0], got %q", lease.Command)
+	}
+	if bytes.Contains(data, []byte("printf ready")) || bytes.Contains(data, []byte("sleep")) {
+		t.Fatalf("lease file should not contain full command arguments: %s", data)
+	}
+	if !lease.Interactive {
+		t.Fatal("stdio lease should be interactive")
+	}
+	if lease.StartedAt.IsZero() || lease.UpdatedAt.IsZero() || lease.ExpiresAt.IsZero() {
+		t.Fatalf("lease should record startedAt, updatedAt, and expiresAt: %#v", lease)
+	}
+	if time.Duration(lease.IdleAfter) != 5*time.Second {
+		t.Fatalf("idleAfter mismatch: want 5s, got %s", time.Duration(lease.IdleAfter))
+	}
+	if !lease.ExpiresAt.After(lease.StartedAt.Add(5 * time.Second)) {
+		t.Fatalf("expiresAt should be a crash-safety TTL, got startedAt=%s expiresAt=%s", lease.StartedAt, lease.ExpiresAt)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("run stdio command: %v", err)
+	}
+	waitForNoLeaseFiles(t, leaseDir)
+	if !strings.Contains(out.String(), "ready") {
+		t.Fatalf("expected child output through PTY, got %q", out.String())
+	}
+}
+
+func TestRunStdioCommandRefreshesLeaseHeartbeat(t *testing.T) {
+	skipPTYIntegrationIfUnsupported(t)
+
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runStdioCommand(stdioRunRequest{
+			Command:   []string{"sh", "-c", "sleep 0.8"},
+			IdleAfter: 300 * time.Millisecond,
+			Stdin:     strings.NewReader(""),
+			Stdout:    &bytes.Buffer{},
+			Stderr:    &bytes.Buffer{},
+		})
+	}()
+
+	leasePath := waitForSingleLeaseFile(t, leaseDir, done)
+	initial := readStdioLeaseFile(t, leasePath)
+	updated := waitForLeaseHeartbeatAfter(t, leasePath, initial.UpdatedAt, done)
+
+	if !updated.UpdatedAt.After(initial.UpdatedAt) {
+		t.Fatalf("updatedAt should advance, initial=%s updated=%s", initial.UpdatedAt, updated.UpdatedAt)
+	}
+	if !updated.ExpiresAt.After(initial.ExpiresAt) {
+		t.Fatalf("expiresAt should refresh with heartbeat, initial=%s updated=%s", initial.ExpiresAt, updated.ExpiresAt)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("run stdio command: %v", err)
+	}
+	waitForNoLeaseFiles(t, leaseDir)
+}
+
 func skipPTYIntegrationIfUnsupported(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -265,4 +390,84 @@ func skipPTYIntegrationIfUnsupported(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh is required for PTY integration tests")
 	}
+	t.Setenv("ME_LEASE_DIR", t.TempDir())
+}
+
+func readStdioLeaseFile(t *testing.T, path string) idleLease {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lease file: %v", err)
+	}
+	var lease idleLease
+	if err := json.Unmarshal(data, &lease); err != nil {
+		t.Fatalf("decode lease JSON %s: %v", data, err)
+	}
+	return lease
+}
+
+func waitForSingleLeaseFile(t *testing.T, dir string, done <-chan error) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("stdio command exited before lease file appeared: %v", err)
+		default:
+		}
+
+		matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
+		if err != nil {
+			t.Fatalf("glob lease files: %v", err)
+		}
+		if len(matches) == 1 {
+			return matches[0]
+		}
+		if len(matches) > 1 {
+			t.Fatalf("expected one lease file, got %v", matches)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for lease file in %s", dir)
+	return ""
+}
+
+func waitForLeaseHeartbeatAfter(t *testing.T, path string, previous time.Time, done <-chan error) idleLease {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("stdio command exited before heartbeat refreshed: %v", err)
+		default:
+		}
+
+		lease := readStdioLeaseFile(t, path)
+		if lease.UpdatedAt.After(previous) {
+			return lease
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for heartbeat update in %s", path)
+	return idleLease{}
+}
+
+func waitForNoLeaseFiles(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
+		if err != nil {
+			t.Fatalf("glob lease files: %v", err)
+		}
+		if len(matches) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil {
+		t.Fatalf("glob lease files: %v", err)
+	}
+	t.Fatalf("timed out waiting for lease cleanup, still found %v", matches)
 }

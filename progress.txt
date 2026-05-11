@@ -9,3 +9,7 @@ Verification: `go test ./...` from `go/cli` passed.
 2026-05-11T07:45:31Z - Completed Issue 3, "Run Stdio Commands Under a PTY".
 Implemented `me run --stdio` command wiring with `--idle-after` validation, clear unsupported non-stdio behavior, terminal-backed stdin/stdout checks, PTY startup via `github.com/creack/pty`, input/output proxying, child exit-code passthrough, and conventional signal exit-code mapping.
 Verification: `go test ./...` from `go/cli` passed; Windows and Darwin test packages cross-compiled.
+
+2026-05-11T07:54:19Z - Completed Issue 4, "Create and Clean Up Stdio Lease Files During a PTY Run".
+Implemented Stdio Lease file lifecycle for `me run --stdio`: generated `.json` lease IDs, atomic `0644` lease writes, safe command metadata, root PID/process group/user/cwd timestamps, crash-safety `expiresAt`, bounded heartbeat refreshes, normal-exit cleanup, and stale leftover compatibility with `me idle status --json`.
+Verification: `go test ./...` from `go/cli` passed; `GOOS=windows GOARCH=amd64 go test -c -o /tmp/me-cli-windows.test ./internal/cli` and `GOOS=darwin GOARCH=arm64 go test -c -o /tmp/me-cli-darwin.test ./internal/cli` passed.
