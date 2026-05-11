@@ -387,11 +387,13 @@ type testIdleStatusCounts struct {
 }
 
 type testIdleStatusLease struct {
-	ID               string `json:"id"`
-	State            string `json:"state"`
-	Reason           string `json:"reason"`
-	Command          string `json:"command"`
-	WorkingDirectory string `json:"workingDirectory"`
+	ID               string     `json:"id"`
+	State            string     `json:"state"`
+	Reason           string     `json:"reason"`
+	Command          string     `json:"command"`
+	WorkingDirectory string     `json:"workingDirectory"`
+	LastInputAt      *time.Time `json:"lastInputAt"`
+	LastOutputAt     *time.Time `json:"lastOutputAt"`
 }
 
 func decodeIdleStatusReport(t *testing.T, data []byte) testIdleStatusReport {

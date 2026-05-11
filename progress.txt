@@ -13,3 +13,7 @@ Verification: `go test ./...` from `go/cli` passed; Windows and Darwin test pack
 2026-05-11T07:54:19Z - Completed Issue 4, "Create and Clean Up Stdio Lease Files During a PTY Run".
 Implemented Stdio Lease file lifecycle for `me run --stdio`: generated `.json` lease IDs, atomic `0644` lease writes, safe command metadata, root PID/process group/user/cwd timestamps, crash-safety `expiresAt`, bounded heartbeat refreshes, normal-exit cleanup, and stale leftover compatibility with `me idle status --json`.
 Verification: `go test ./...` from `go/cli` passed; `GOOS=windows GOARCH=amd64 go test -c -o /tmp/me-cli-windows.test ./internal/cli` and `GOOS=darwin GOARCH=arm64 go test -c -o /tmp/me-cli-darwin.test ./internal/cli` passed.
+
+2026-05-11T08:00:37Z - Completed Issue 5, "Renew Stdio Leases From Terminal Input and Output".
+Implemented PTY activity renewal for Stdio Leases: successful user input updates `lastInputAt`, child output updates `lastOutputAt`, meaningful idle-to-active activity flushes promptly, continuing activity is batched until heartbeat flushes, and live quiet sessions report idle rather than stale after `idleAfter`.
+Verification: `go test ./...` from `go/cli` passed; `GOOS=windows GOARCH=amd64 go test -c -o /tmp/me-cli-windows.test ./internal/cli`, `GOOS=darwin GOARCH=arm64 go test -c -o /tmp/me-cli-darwin.test ./internal/cli`, and `git diff --check` passed.

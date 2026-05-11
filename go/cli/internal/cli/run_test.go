@@ -382,6 +382,149 @@ func TestRunStdioCommandRefreshesLeaseHeartbeat(t *testing.T) {
 	waitForNoLeaseFiles(t, leaseDir)
 }
 
+func TestRunStdioCommandRecordsOutputActivityAsActiveLease(t *testing.T) {
+	skipPTYIntegrationIfUnsupported(t)
+
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runStdioCommand(stdioRunRequest{
+			Command:   []string{"sh", "-c", "printf output-activity; sleep 1"},
+			IdleAfter: 5 * time.Second,
+			Stdin:     strings.NewReader(""),
+			Stdout:    &bytes.Buffer{},
+			Stderr:    &bytes.Buffer{},
+		})
+	}()
+
+	leasePath := waitForSingleLeaseFile(t, leaseDir, done)
+	lease := waitForLeaseOutputActivity(t, leasePath, done)
+	if lease.LastInputAt != nil {
+		t.Fatalf("output-only activity should not update lastInputAt: %#v", lease.LastInputAt)
+	}
+	if lease.LastOutputAt == nil {
+		t.Fatal("output activity should update lastOutputAt")
+	}
+	if lease.UpdatedAt.IsZero() {
+		t.Fatal("activity flush should keep heartbeat updated")
+	}
+
+	var status bytes.Buffer
+	if err := runIdleStatus(&status, idleStatusOptions{json: true}, idleStatusDeps{env: os.Getenv}); err != nil {
+		t.Fatalf("run idle status: %v", err)
+	}
+	report := decodeIdleStatusReport(t, status.Bytes())
+	reported := assertReportedLease(t, report, lease.ID, "active", "sh", lease.WorkingDirectory)
+	if reported.LastOutputAt == nil {
+		t.Fatal("status JSON should include lastOutputAt")
+	}
+	if reported.LastInputAt != nil {
+		t.Fatalf("status JSON should not invent input activity: %#v", reported.LastInputAt)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("run stdio command: %v", err)
+	}
+	waitForNoLeaseFiles(t, leaseDir)
+}
+
+func TestRunStdioCommandRecordsInputActivityAsActiveLease(t *testing.T) {
+	skipPTYIntegrationIfUnsupported(t)
+
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	stdin, stdinWriter := io.Pipe()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runStdioCommand(stdioRunRequest{
+			Command:   []string{"sh", "-c", "stty -echo; : > \"$1\"; IFS= read -r line; sleep 1", "sh", readyPath},
+			IdleAfter: 5 * time.Second,
+			Stdin:     stdin,
+			Stdout:    &bytes.Buffer{},
+			Stderr:    &bytes.Buffer{},
+		})
+	}()
+
+	leasePath := waitForSingleLeaseFile(t, leaseDir, done)
+	waitForFile(t, readyPath, done)
+	if _, err := stdinWriter.Write([]byte("input-activity\n")); err != nil {
+		t.Fatalf("write test stdin: %v", err)
+	}
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatalf("close test stdin: %v", err)
+	}
+	lease := waitForLeaseInputActivity(t, leasePath, done)
+	if lease.LastInputAt == nil {
+		t.Fatal("input activity should update lastInputAt")
+	}
+	if lease.LastOutputAt != nil {
+		t.Fatalf("input-only activity should not update lastOutputAt: %#v", lease.LastOutputAt)
+	}
+
+	var status bytes.Buffer
+	if err := runIdleStatus(&status, idleStatusOptions{json: true}, idleStatusDeps{env: os.Getenv}); err != nil {
+		t.Fatalf("run idle status: %v", err)
+	}
+	report := decodeIdleStatusReport(t, status.Bytes())
+	reported := assertReportedLease(t, report, lease.ID, "active", "sh", lease.WorkingDirectory)
+	if reported.LastInputAt == nil {
+		t.Fatal("status JSON should include lastInputAt")
+	}
+	if reported.LastOutputAt != nil {
+		t.Fatalf("status JSON should not invent output activity: %#v", reported.LastOutputAt)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("run stdio command: %v", err)
+	}
+	waitForNoLeaseFiles(t, leaseDir)
+}
+
+func TestRunStdioCommandReportsQuietLeaseIdleAfterIdleWindow(t *testing.T) {
+	skipPTYIntegrationIfUnsupported(t)
+
+	leaseDir := t.TempDir()
+	t.Setenv("ME_LEASE_DIR", leaseDir)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runStdioCommand(stdioRunRequest{
+			Command:   []string{"sh", "-c", "printf once; sleep 1"},
+			IdleAfter: 200 * time.Millisecond,
+			Stdin:     strings.NewReader(""),
+			Stdout:    &bytes.Buffer{},
+			Stderr:    &bytes.Buffer{},
+		})
+	}()
+
+	leasePath := waitForSingleLeaseFile(t, leaseDir, done)
+	lease := waitForLeaseOutputActivity(t, leasePath, done)
+	waitUntilAfter(t, lease.LastOutputAt.Add(250*time.Millisecond), done)
+
+	var jsonStatus bytes.Buffer
+	if err := runIdleStatus(&jsonStatus, idleStatusOptions{json: true}, idleStatusDeps{env: os.Getenv}); err != nil {
+		t.Fatalf("run JSON idle status: %v", err)
+	}
+	report := decodeIdleStatusReport(t, jsonStatus.Bytes())
+	assertReportedLease(t, report, lease.ID, "idle", "sh", lease.WorkingDirectory)
+
+	var humanStatus bytes.Buffer
+	if err := runIdleStatus(&humanStatus, idleStatusOptions{}, idleStatusDeps{env: os.Getenv}); err != nil {
+		t.Fatalf("run human idle status: %v", err)
+	}
+	assertContains(t, humanStatus.String(), "Idle leases: 0 active, 1 idle, 0 stale (1 total)")
+	assertContains(t, humanStatus.String(), "- "+lease.ID+" [stdio] idle: command=sh cwd="+lease.WorkingDirectory+" reason=terminal activity older than idle window")
+
+	if err := <-done; err != nil {
+		t.Fatalf("run stdio command: %v", err)
+	}
+	waitForNoLeaseFiles(t, leaseDir)
+}
+
 func skipPTYIntegrationIfUnsupported(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -450,6 +593,77 @@ func waitForLeaseHeartbeatAfter(t *testing.T, path string, previous time.Time, d
 	}
 	t.Fatalf("timed out waiting for heartbeat update in %s", path)
 	return idleLease{}
+}
+
+func waitForLeaseOutputActivity(t *testing.T, path string, done <-chan error) idleLease {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("stdio command exited before output activity was recorded: %v", err)
+		default:
+		}
+
+		lease := readStdioLeaseFile(t, path)
+		if lease.LastOutputAt != nil {
+			return lease
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for output activity in %s", path)
+	return idleLease{}
+}
+
+func waitForLeaseInputActivity(t *testing.T, path string, done <-chan error) idleLease {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("stdio command exited before input activity was recorded: %v", err)
+		default:
+		}
+
+		lease := readStdioLeaseFile(t, path)
+		if lease.LastInputAt != nil {
+			return lease
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for input activity in %s", path)
+	return idleLease{}
+}
+
+func waitForFile(t *testing.T, path string, done <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("stdio command exited before %s appeared: %v", path, err)
+		default:
+		}
+
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
+}
+
+func waitUntilAfter(t *testing.T, when time.Time, done <-chan error) {
+	t.Helper()
+	timer := time.NewTimer(time.Until(when))
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		t.Fatalf("stdio command exited before %s: %v", when, err)
+	case <-timer.C:
+	}
 }
 
 func waitForNoLeaseFiles(t *testing.T, dir string) {

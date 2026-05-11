@@ -32,7 +32,7 @@ Default label: `ready-for-agent`
 
 5. **Title**: Renew Stdio Leases from terminal input and output
    **Type**: AFK
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: None - Issues 1, 2, and 4 are complete
    **User stories covered**: 1-6, 22-25, 30-31, 38
 
@@ -184,9 +184,9 @@ None - can start immediately.
 
 Type: AFK
 
-Label: `ready-for-agent`
+Label: `done`
 
-Status: Ready
+Status: Done
 
 ### What to build
 
@@ -196,18 +196,18 @@ After this slice, `me idle status` and `me idle status --json` should show a run
 
 ### Acceptance criteria
 
-- [ ] User input through the PTY updates `lastInputAt`.
-- [ ] Child output through the PTY updates `lastOutputAt`.
-- [ ] Input and output timestamps are distinct from `updatedAt`.
-- [ ] Output alone is enough to keep a Stdio Lease active.
-- [ ] Input alone is enough to keep a Stdio Lease active.
-- [ ] A running but quiet stdio command becomes idle after `idleAfter`.
-- [ ] A quiet but heartbeating stdio wrapper is reported as `idle`, not `stale`.
-- [ ] Activity timestamp updates are flushed on a bounded cadence instead of on every byte.
-- [ ] Meaningful activity state changes flush promptly.
-- [ ] `me idle status --json` reports active and idle Stdio Leases according to terminal activity.
-- [ ] `me idle status` reports the same states and reasons in human-readable form.
-- [ ] Tests verify input-only renewal, output-only renewal, quiet-idle classification, heartbeat-versus-activity distinction, and JSON/human status consistency.
+- [x] User input through the PTY updates `lastInputAt`.
+- [x] Child output through the PTY updates `lastOutputAt`.
+- [x] Input and output timestamps are distinct from `updatedAt`.
+- [x] Output alone is enough to keep a Stdio Lease active.
+- [x] Input alone is enough to keep a Stdio Lease active.
+- [x] A running but quiet stdio command becomes idle after `idleAfter`.
+- [x] A quiet but heartbeating stdio wrapper is reported as `idle`, not `stale`.
+- [x] Activity timestamp updates are flushed on a bounded cadence instead of on every byte.
+- [x] Meaningful activity state changes flush promptly.
+- [x] `me idle status --json` reports active and idle Stdio Leases according to terminal activity.
+- [x] `me idle status` reports the same states and reasons in human-readable form.
+- [x] Tests verify input-only renewal, output-only renewal, quiet-idle classification, heartbeat-versus-activity distinction, and JSON/human status consistency.
 
 ### Blocked by
 

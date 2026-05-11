@@ -67,3 +67,55 @@ func TestIdleLeaseFileStorePublishesOnlyFinalJSONFile(t *testing.T) {
 		t.Fatalf("lease ID mismatch: %q", lease.ID)
 	}
 }
+
+func TestStdioLeaseSessionFlushesMeaningfulActivityThenBatchesContinuingActivity(t *testing.T) {
+	leaseDir := t.TempDir()
+	session := &stdioLeaseSession{
+		store: idleLeaseFileStore{dir: leaseDir},
+		lease: idleLease{
+			Kind:         stdioLeaseKind,
+			ID:           "stdio-test",
+			RootPID:      os.Getpid(),
+			ProcessGroup: os.Getpid(),
+			Interactive:  true,
+			IdleAfter:    idleLeaseDuration(time.Minute),
+		},
+	}
+	leasePath := session.store.path(session.lease.ID)
+	firstActivity := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	if err := session.recordOutput(firstActivity); err != nil {
+		t.Fatalf("record first output activity: %v", err)
+	}
+	published := readStdioLeaseFile(t, leasePath)
+	if published.LastOutputAt == nil || !published.LastOutputAt.Equal(firstActivity) {
+		t.Fatalf("first output activity should flush promptly, got %#v", published.LastOutputAt)
+	}
+	if published.LastInputAt != nil {
+		t.Fatalf("output activity should not update input activity: %#v", published.LastInputAt)
+	}
+	if published.UpdatedAt.Equal(firstActivity) {
+		t.Fatalf("updatedAt should remain heartbeat metadata, got same time as activity %s", published.UpdatedAt)
+	}
+
+	secondActivity := firstActivity.Add(10 * time.Second)
+	if err := session.recordOutput(secondActivity); err != nil {
+		t.Fatalf("record continuing output activity: %v", err)
+	}
+	batched := readStdioLeaseFile(t, leasePath)
+	if batched.LastOutputAt == nil || !batched.LastOutputAt.Equal(firstActivity) {
+		t.Fatalf("continuing activity should be batched until heartbeat, got %#v", batched.LastOutputAt)
+	}
+
+	heartbeat := firstActivity.Add(20 * time.Second)
+	if err := session.flush(heartbeat); err != nil {
+		t.Fatalf("flush heartbeat: %v", err)
+	}
+	flushed := readStdioLeaseFile(t, leasePath)
+	if flushed.LastOutputAt == nil || !flushed.LastOutputAt.Equal(secondActivity) {
+		t.Fatalf("heartbeat should persist batched activity, got %#v", flushed.LastOutputAt)
+	}
+	if !flushed.UpdatedAt.Equal(heartbeat) {
+		t.Fatalf("heartbeat timestamp mismatch: want %s, got %s", heartbeat, flushed.UpdatedAt)
+	}
+}

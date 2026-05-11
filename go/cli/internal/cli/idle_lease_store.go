@@ -77,11 +77,12 @@ func (store idleLeaseFileStore) path(id string) string {
 }
 
 type stdioLeaseSession struct {
-	store idleLeaseFileStore
-	lease idleLease
-	mu    sync.Mutex
-	stop  chan struct{}
-	done  chan error
+	store   idleLeaseFileStore
+	lease   idleLease
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	stop    chan struct{}
+	done    chan error
 }
 
 func newStdioLeaseSession(req stdioRunRequest) (*stdioLeaseSession, error) {
@@ -163,7 +164,39 @@ func (session *stdioLeaseSession) runHeartbeat(interval time.Duration) {
 	}
 }
 
+func (session *stdioLeaseSession) recordInput(now time.Time) error {
+	return session.recordTerminalActivity(now, true)
+}
+
+func (session *stdioLeaseSession) recordOutput(now time.Time) error {
+	return session.recordTerminalActivity(now, false)
+}
+
+func (session *stdioLeaseSession) recordTerminalActivity(now time.Time, input bool) error {
+	now = now.UTC()
+
+	session.mu.Lock()
+	previousActivity, hadPreviousActivity := latestTerminalActivity(session.lease)
+	activityAt := now
+	if input {
+		session.lease.LastInputAt = &activityAt
+	} else {
+		session.lease.LastOutputAt = &activityAt
+	}
+	idleAfter := time.Duration(session.lease.IdleAfter)
+	activityBecameActive := !hadPreviousActivity || previousActivity.Before(now.Add(-idleAfter))
+	session.mu.Unlock()
+
+	if activityBecameActive {
+		return session.flush(time.Now().UTC())
+	}
+	return nil
+}
+
 func (session *stdioLeaseSession) flush(now time.Time) error {
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+
 	session.mu.Lock()
 	session.lease.UpdatedAt = now
 	session.lease.ExpiresAt = stdioLeaseExpiresAt(now, time.Duration(session.lease.IdleAfter))

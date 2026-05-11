@@ -140,7 +140,10 @@ func runStdioCommand(req stdioRunRequest) error {
 
 	outputDone := make(chan error, 1)
 	go func() {
-		_, err := io.Copy(req.Stdout, ptmx)
+		_, err := io.Copy(stdioActivityWriter{
+			dst:    req.Stdout,
+			record: leaseSession.recordOutput,
+		}, ptmx)
 		if isIgnorablePTYCopyError(err) {
 			err = nil
 		}
@@ -148,7 +151,10 @@ func runStdioCommand(req stdioRunRequest) error {
 	}()
 
 	go func() {
-		_, _ = io.Copy(ptmx, req.Stdin)
+		_, _ = io.Copy(stdioActivityWriter{
+			dst:    ptmx,
+			record: leaseSession.recordInput,
+		}, req.Stdin)
 	}()
 
 	waitErr := child.Wait()
@@ -181,6 +187,21 @@ func isIgnorablePTYCopyError(err error) bool {
 	}
 	message := err.Error()
 	return strings.Contains(message, "input/output error") || strings.Contains(message, "file already closed")
+}
+
+type stdioActivityWriter struct {
+	dst    io.Writer
+	record func(time.Time) error
+}
+
+func (writer stdioActivityWriter) Write(p []byte) (int, error) {
+	n, err := writer.dst.Write(p)
+	if n > 0 && writer.record != nil {
+		if recordErr := writer.record(time.Now().UTC()); recordErr != nil && err == nil {
+			return n, recordErr
+		}
+	}
+	return n, err
 }
 
 type commandExitError struct {
