@@ -194,7 +194,7 @@ func readAndEvaluateIdleLease(path, filename string, now time.Time, processAlive
 		lease.ID = strings.TrimSuffix(filename, filepath.Ext(filename))
 	}
 
-	return evaluateIdleLease(lease, now, processAlive)
+	return idleStatusLeaseFromEvaluation(lease, lease.evaluate(now, processAlive(lease.RootPID)))
 }
 
 func malformedIdleStatusLease(filename, reason string) idleStatusLease {
@@ -205,10 +205,12 @@ func malformedIdleStatusLease(filename, reason string) idleStatusLease {
 	}
 }
 
-func evaluateIdleLease(lease idleLease, now time.Time, processAlive func(int) bool) idleStatusLease {
-	report := idleStatusLease{
+func idleStatusLeaseFromEvaluation(lease idleLease, evaluation idleLeaseEvaluation) idleStatusLease {
+	return idleStatusLease{
 		ID:               lease.ID,
 		Kind:             lease.Kind,
+		State:            evaluation.State,
+		Reason:           idleLeaseEvaluationReasonText(evaluation.Reason),
 		RootPID:          lease.RootPID,
 		ProcessGroup:     lease.ProcessGroup,
 		User:             lease.User,
@@ -222,101 +224,31 @@ func evaluateIdleLease(lease idleLease, now time.Time, processAlive func(int) bo
 		IdleAfter:        lease.IdleAfter,
 		ExpiresAt:        lease.ExpiresAt,
 	}
-
-	idleAfter := time.Duration(lease.IdleAfter)
-	if idleAfter <= 0 {
-		report.State = idleLeaseStateStale
-		report.Reason = "invalid idleAfter"
-		return report
-	}
-	if lease.ExpiresAt.IsZero() {
-		report.State = idleLeaseStateStale
-		report.Reason = "missing expiresAt"
-		return report
-	}
-	if lease.UpdatedAt.IsZero() {
-		report.State = idleLeaseStateStale
-		report.Reason = "missing heartbeat"
-		return report
-	}
-	if now.After(lease.ExpiresAt) {
-		report.State = idleLeaseStateStale
-		report.Reason = "lease expired"
-		return report
-	}
-	if now.Sub(lease.UpdatedAt) > idleHeartbeatStaleAfter(idleAfter) {
-		report.State = idleLeaseStateStale
-		report.Reason = "heartbeat is too old"
-		return report
-	}
-	if !processAlive(lease.RootPID) {
-		report.State = idleLeaseStateStale
-		report.Reason = "root process is not running"
-		return report
-	}
-
-	lastActivity, ok := latestTerminalActivity(lease)
-	if !ok {
-		report.State = idleLeaseStateIdle
-		report.Reason = "no terminal activity recorded"
-		return report
-	}
-	if !lastActivity.Before(now.Add(-idleAfter)) {
-		report.State = idleLeaseStateActive
-		report.Reason = "terminal activity within idle window"
-		return report
-	}
-
-	report.State = idleLeaseStateIdle
-	report.Reason = "terminal activity older than idle window"
-	return report
 }
 
-func latestTerminalActivity(lease idleLease) (time.Time, bool) {
-	var latest time.Time
-	if lease.LastInputAt != nil {
-		latest = *lease.LastInputAt
+func idleLeaseEvaluationReasonText(reason idleLeaseEvaluationReason) string {
+	switch reason {
+	case idleLeaseEvaluationReasonInvalidIdleAfter:
+		return "invalid idleAfter"
+	case idleLeaseEvaluationReasonMissingExpiresAt:
+		return "missing expiresAt"
+	case idleLeaseEvaluationReasonMissingHeartbeat:
+		return "missing heartbeat"
+	case idleLeaseEvaluationReasonLeaseExpired:
+		return "lease expired"
+	case idleLeaseEvaluationReasonHeartbeatTooOld:
+		return "heartbeat is too old"
+	case idleLeaseEvaluationReasonRootProcessNotRunning:
+		return "root process is not running"
+	case idleLeaseEvaluationReasonNoTerminalActivity:
+		return "no terminal activity recorded"
+	case idleLeaseEvaluationReasonTerminalActivityOlderThanIdleWindow:
+		return "terminal activity older than idle window"
+	case idleLeaseEvaluationReasonTerminalActivityWithinIdleWindow:
+		return "terminal activity within idle window"
+	default:
+		return "unknown"
 	}
-	if lease.LastOutputAt != nil && lease.LastOutputAt.After(latest) {
-		latest = *lease.LastOutputAt
-	}
-	if latest.IsZero() {
-		return time.Time{}, false
-	}
-	return latest, true
-}
-
-func idleHeartbeatStaleAfter(idleAfter time.Duration) time.Duration {
-	staleAfter := idleAfter * 2
-	if staleAfter < 5*time.Minute {
-		return 5 * time.Minute
-	}
-	return staleAfter
-}
-
-type idleLeaseState string
-
-const (
-	idleLeaseStateActive idleLeaseState = "active"
-	idleLeaseStateIdle   idleLeaseState = "idle"
-	idleLeaseStateStale  idleLeaseState = "stale"
-)
-
-type idleLease struct {
-	Kind             string            `json:"kind"`
-	ID               string            `json:"id"`
-	RootPID          int               `json:"rootPid"`
-	ProcessGroup     int               `json:"processGroup"`
-	User             string            `json:"user"`
-	WorkingDirectory string            `json:"workingDirectory"`
-	Command          string            `json:"command"`
-	Interactive      bool              `json:"interactive"`
-	StartedAt        time.Time         `json:"startedAt"`
-	UpdatedAt        time.Time         `json:"updatedAt"`
-	LastInputAt      *time.Time        `json:"lastInputAt,omitempty"`
-	LastOutputAt     *time.Time        `json:"lastOutputAt,omitempty"`
-	IdleAfter        idleLeaseDuration `json:"idleAfter"`
-	ExpiresAt        time.Time         `json:"expiresAt"`
 }
 
 type idleStatusReport struct {
@@ -350,26 +282,4 @@ type idleStatusLease struct {
 	LastOutputAt     *time.Time        `json:"lastOutputAt,omitempty"`
 	IdleAfter        idleLeaseDuration `json:"idleAfter,omitempty"`
 	ExpiresAt        time.Time         `json:"expiresAt,omitempty"`
-}
-
-type idleLeaseDuration time.Duration
-
-func (d *idleLeaseDuration) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return fmt.Errorf("idleAfter must be a duration string: %w", err)
-	}
-	duration, err := time.ParseDuration(value)
-	if err != nil {
-		return fmt.Errorf("parse idleAfter: %w", err)
-	}
-	*d = idleLeaseDuration(duration)
-	return nil
-}
-
-func (d idleLeaseDuration) MarshalJSON() ([]byte, error) {
-	if d == 0 {
-		return []byte("null"), nil
-	}
-	return json.Marshal(time.Duration(d).String())
 }

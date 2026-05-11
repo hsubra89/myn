@@ -165,29 +165,20 @@ func (session *stdioLeaseSession) runHeartbeat(interval time.Duration) {
 }
 
 func (session *stdioLeaseSession) recordInput(now time.Time) error {
-	return session.recordTerminalActivity(now, true)
+	return session.recordTerminalActivity(now, idleLeaseTerminalActivityInput)
 }
 
 func (session *stdioLeaseSession) recordOutput(now time.Time) error {
-	return session.recordTerminalActivity(now, false)
+	return session.recordTerminalActivity(now, idleLeaseTerminalActivityOutput)
 }
 
-func (session *stdioLeaseSession) recordTerminalActivity(now time.Time, input bool) error {
-	now = now.UTC()
-
+func (session *stdioLeaseSession) recordTerminalActivity(now time.Time, kind idleLeaseTerminalActivityKind) error {
 	session.mu.Lock()
-	previousActivity, hadPreviousActivity := latestTerminalActivity(session.lease)
-	activityAt := now
-	if input {
-		session.lease.LastInputAt = &activityAt
-	} else {
-		session.lease.LastOutputAt = &activityAt
-	}
-	idleAfter := time.Duration(session.lease.IdleAfter)
-	activityBecameActive := !hadPreviousActivity || previousActivity.Before(now.Add(-idleAfter))
+	update := session.lease.recordTerminalActivity(now, kind)
+	session.lease = update.Lease
 	session.mu.Unlock()
 
-	if activityBecameActive {
+	if update.FlushNow {
 		return session.flush(time.Now().UTC())
 	}
 	return nil
@@ -198,8 +189,7 @@ func (session *stdioLeaseSession) flush(now time.Time) error {
 	defer session.writeMu.Unlock()
 
 	session.mu.Lock()
-	session.lease.UpdatedAt = now
-	session.lease.ExpiresAt = stdioLeaseExpiresAt(now, time.Duration(session.lease.IdleAfter))
+	session.lease = session.lease.recordHeartbeat(now)
 	lease := session.lease
 	session.mu.Unlock()
 
@@ -223,10 +213,6 @@ func currentIdleLeaseUser() string {
 		return value
 	}
 	return "unknown"
-}
-
-func stdioLeaseExpiresAt(now time.Time, idleAfter time.Duration) time.Time {
-	return now.Add(idleHeartbeatStaleAfter(idleAfter) + time.Minute)
 }
 
 func stdioLeaseHeartbeatInterval(idleAfter time.Duration) time.Duration {
