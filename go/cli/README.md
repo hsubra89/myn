@@ -1,5 +1,9 @@
 # Myn
 
+<p align="center">
+  <img src="../../logos/myn-seagull-variation-5-icon-palette-04-m-blue-dark-electric-blue.svg" alt="Myn seagull logo" width="180">
+</p>
+
 Myn ("mine") provisions and operates your personal development environment.
 
 ## Development
