@@ -171,6 +171,61 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 	}
 }
 
+func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
+	tests := []struct {
+		name          string
+		personal      personalServerConfig
+		wantPlanHost  string
+		wantSSHTarget string
+	}{
+		{
+			name: "prefers IPv4 before IPv6",
+			personal: personalServerConfig{
+				ServerID: 123456,
+				User:     "harish",
+				IPv4:     "203.0.113.10",
+				IPv6:     "2001:db8::10",
+			},
+			wantPlanHost:  "203.0.113.10",
+			wantSSHTarget: "harish@203.0.113.10",
+		},
+		{
+			name: "falls back to bracketed IPv6 target",
+			personal: personalServerConfig{
+				ServerID: 123456,
+				User:     "harish",
+				IPv6:     "2001:db8::10",
+			},
+			wantPlanHost:  "2001:db8::10",
+			wantSSHTarget: "harish@[2001:db8::10]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newConnectTestFixture(t)
+			cfg := fixture.validConfig()
+			cfg.PersonalServer = tt.personal
+
+			plan, err := planPersonalServerConnection(cfg, fixture.home, connectDeps{
+				workingDir: func() (string, error) {
+					return fixture.localRoot, nil
+				},
+				stat: os.Stat,
+			})
+			if err != nil {
+				t.Fatalf("plan connection: %v", err)
+			}
+			if plan.sshHost != tt.wantPlanHost {
+				t.Fatalf("planned SSH host mismatch: want %q, got %q", tt.wantPlanHost, plan.sshHost)
+			}
+			if command := connectSSHCommand(plan); !containsString(command, tt.wantSSHTarget) {
+				t.Fatalf("SSH target %q missing from command %#v", tt.wantSSHTarget, command)
+			}
+		})
+	}
+}
+
 func TestConnectTmuxSessionNameNormalizesRemoteProjectRoot(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -556,6 +611,41 @@ func TestConnectOutsideConfiguredLocalRootFailsBeforeSSH(t *testing.T) {
 	}
 	if len(runner.requests) != 0 {
 		t.Fatalf("process should not start after outside-root error, got %d calls", len(runner.requests))
+	}
+}
+
+func TestConnectUsesSSHWithoutHetznerCredentialsOrLeases(t *testing.T) {
+	fixture := newConnectTestFixture(t)
+	cfg := fixture.validConfig()
+	cfg.Auth = authConfig{}
+	fixture.saveConfig(t, cfg)
+
+	leaseDir := t.TempDir()
+	t.Setenv("MYN_LEASE_DIR", leaseDir)
+
+	runner := &fakeConnectProcessRunner{}
+	err := runConnectCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, nil, fixture.deps(runner))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if len(runner.requests) != 1 {
+		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
+	}
+	command := runner.requests[0].Command
+	if len(command) == 0 || command[0] != "ssh" {
+		t.Fatalf("connect should start SSH directly, got %#v", command)
+	}
+	for _, arg := range command {
+		if strings.Contains(arg, "mosh") {
+			t.Fatalf("connect should not use Mosh Access, got %#v", command)
+		}
+	}
+	entries, err := os.ReadDir(leaseDir)
+	if err != nil {
+		t.Fatalf("read lease directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("connect should not create Idle Lease or Stdio Lease files, got %v", entries)
 	}
 }
 

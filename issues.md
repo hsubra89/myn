@@ -30,7 +30,7 @@ Source: PRD: Project-Scoped Personal Server Connection
 
 5. **Title**: Complete Host Selection and Connection Documentation  
    **Type**: AFK  
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: Issue 4 (done)
    **User stories covered**: 21, 23, 24, 32, 33, 34
 
@@ -144,7 +144,7 @@ When creating a new session, choose the starting directory on the Personal Serve
 
 ## Issue 5: Complete Host Selection and Connection Documentation
 
-**Status**: Ready
+**Status**: Done
 
 ## What to build
 
@@ -156,16 +156,16 @@ Update documentation so users can discover `myn connect` and `myn c`, understand
 
 ## Acceptance criteria
 
-- [ ] Saved IPv4 is selected before saved IPv6.
-- [ ] Saved IPv6 is selected when IPv4 is unavailable.
-- [ ] IPv6 literals are bracketed correctly in SSH targets.
-- [ ] Missing saved addresses fail before SSH with clear messaging.
-- [ ] `myn connect` does not require Hetzner Credentials and does not call the Hetzner API.
-- [ ] `myn connect` does not create an Idle Lease or Stdio Lease.
-- [ ] User-facing documentation describes `myn connect` and `myn c`.
-- [ ] User-facing documentation describes local-to-remote path mapping and project-scoped tmux sessions.
-- [ ] User-facing documentation describes the initial limits and failure behavior.
-- [ ] Tests cover IPv4 preference, IPv6 fallback, IPv6 bracket formatting, missing addresses, and no Hetzner dependency.
+- [x] Saved IPv4 is selected before saved IPv6.
+- [x] Saved IPv6 is selected when IPv4 is unavailable.
+- [x] IPv6 literals are bracketed correctly in SSH targets.
+- [x] Missing saved addresses fail before SSH with clear messaging.
+- [x] `myn connect` does not require Hetzner Credentials and does not call the Hetzner API.
+- [x] `myn connect` does not create an Idle Lease or Stdio Lease.
+- [x] User-facing documentation describes `myn connect` and `myn c`.
+- [x] User-facing documentation describes local-to-remote path mapping and project-scoped tmux sessions.
+- [x] User-facing documentation describes the initial limits and failure behavior.
+- [x] Tests cover IPv4 preference, IPv6 fallback, IPv6 bracket formatting, missing addresses, and no Hetzner dependency.
 
 ## Blocked by
 

@@ -28,3 +28,10 @@
 - Added new-session fallback selection for exact mapped remote directory, remote Project root, then the Personal Server User home directory, using only remote `-d` directory checks and no directory creation.
 - Added tests for Project-scoped handoff construction, session-name normalization, shell quoting for paths with spaces and punctuation, and plan-level session names.
 - Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
+
+2026-05-13 - Issue 5: Complete Host Selection and Connection Documentation
+
+- Added explicit Personal Server Connection tests for IPv4 preference, IPv6 fallback, bracketed IPv6 SSH targets, and running without Hetzner Credentials, Mosh Access, or Idle/Stdio Lease files.
+- Updated the CLI README to document `myn connect`/`myn c`, local-to-remote path mapping, project-scoped tmux session behavior, saved Personal Server User config, host selection, local validation, and initial limits.
+- Marked Issue 5 complete in `issues.md`.
+- Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
