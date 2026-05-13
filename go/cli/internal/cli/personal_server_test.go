@@ -899,7 +899,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"- root IPv6: ssh -i ~/.ssh/id_ed25519 root@[2001:db8::55]",
 		"Mosh commands:",
 		"- user IPv4: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
-		"- user IPv6: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@[2001:db8::55]",
+		"- user IPv6: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)

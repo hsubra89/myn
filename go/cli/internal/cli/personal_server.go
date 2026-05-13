@@ -642,7 +642,7 @@ func writePersonalServerMoshCommand(out io.Writer, label string, identityFile st
 		fmt.Fprintf(out, "- %s: unavailable\n", label)
 		return
 	}
-	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -i ~/%s\" %s@%s\n", label, identityFile, user, personalServerSSHCommandHost(host))
+	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -i ~/%s\" %s@%s\n", label, identityFile, user, host)
 }
 
 func personalServerBootstrapHost(server personalServerCloudServer) string {
