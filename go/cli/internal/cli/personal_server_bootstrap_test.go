@@ -73,6 +73,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"ME_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
 		"export ME_USER='harish'",
 		"install -d -o \"$ME_USER\" -g \"$ME_USER\" \"$ME_REMOTE_PROJECT_ROOT\"",
+		"apt-get install -y ca-certificates curl gnupg lsb-release unattended-upgrades apt-transport-https build-essential procps file git sudo mosh",
 		"systemctl enable --now unattended-upgrades",
 		"APT::Periodic::Unattended-Upgrade \"1\";",
 		"https://download.docker.com/linux/ubuntu",
@@ -94,6 +95,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"\"toolVersions\"",
 		"me_user = os.environ.get(\"ME_USER\", \"\")",
 		"\"sudo\", \"-H\", \"-u\", me_user",
+		"\"mosh\": [\"mosh-server\", \"--version\"]",
 		"\"brew\": user_command([\"/home/linuxbrew/.linuxbrew/bin/brew\", \"--version\"])",
 		"\"node\": user_shell(\"source /etc/profile.d/me-personal-server.sh >/dev/null 2>&1; node --version\")",
 		"\"partialFailures\"",
@@ -108,6 +110,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"rustup toolchain install",
 		"git clone",
 		"gh auth login",
+		"brew install mosh",
 		"$6$abcdefghijklmnop$hashed",
 	} {
 		if strings.Contains(script, forbidden) {

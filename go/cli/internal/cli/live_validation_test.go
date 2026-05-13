@@ -554,7 +554,10 @@ func assertLiveValidationFirewall(t *testing.T, ctx context.Context, client *hcl
 	}
 
 	assertLiveValidationLabels(t, "firewall", after.Labels)
-	if got, want := firewallRuleSummaries(after.Rules), []string{"in tcp 22 0.0.0.0/0,::/0"}; !equalStringSlices(got, want) {
+	if got, want := firewallRuleSummaries(after.Rules), []string{
+		"in tcp 22 0.0.0.0/0,::/0",
+		"in udp 60000-61000 0.0.0.0/0,::/0",
+	}; !equalStringSlices(got, want) {
 		t.Fatalf("new live Personal Server Firewall rules mismatch: want %v, got %v", want, got)
 	}
 	t.Logf("created Personal Server Firewall %d and intentionally left it in place", after.ID)

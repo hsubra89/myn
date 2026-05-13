@@ -158,8 +158,8 @@ pricing is available, or clearly says the price is unavailable.
 Before creating cloud resources, `configure` shows an install plan grouped as:
 
 - System services: security updates, unattended security upgrades, Docker
-  Engine, Docker Compose, the Personal Server User, SSH access, and the remote
-  project root.
+  Engine, Docker Compose, Mosh access, the Personal Server User, SSH access,
+  and the remote project root.
 - Homebrew tools: `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, `nvm`, latest LTS
   Node.js, and npm.
 - Coding agents: Codex and Claude Code.
@@ -179,15 +179,18 @@ root SSH readiness, and the cloud-init Personal Server Bootstrap completion
 marker. A created server ID and assigned IP addresses are saved even if
 bootstrap fails or times out, so the billable server can be inspected.
 
-When provisioning finishes, `configure` prints SSH commands for the Personal
-Server User and root over IPv4 and IPv6, IPv4 first. Each command includes
-`-i` with the configured SSH identity.
+When provisioning finishes successfully, `configure` prints SSH commands for
+the Personal Server User and root over IPv4 and IPv6, IPv4 first. Each SSH
+command includes `-i` with the configured SSH identity. It also prints Mosh
+commands for the Personal Server User with the configured SSH identity passed
+through `--ssh`.
 
 `me` creates or reuses the `me-personal-server` firewall and a Hetzner SSH key
 resource for the configured SSH identity. A newly created firewall allows
-inbound SSH from all IPv4 and IPv6 sources only. Existing firewall rules are
-not reset, and supporting resources are not automatically cleaned up on server
-creation, cancellation, or bootstrap failure.
+inbound SSH and Mosh UDP `60000-61000` from all IPv4 and IPv6 sources only.
+Existing firewall rules are not reset, so reused firewalls may need the Mosh UDP
+rule added manually. Supporting resources are not automatically cleaned up on
+server creation, cancellation, or bootstrap failure.
 
 Personal Server provisioning does not create SSH config aliases, clone or sync
 projects, copy dotfiles, copy GitHub credentials, authenticate `gh`, or install

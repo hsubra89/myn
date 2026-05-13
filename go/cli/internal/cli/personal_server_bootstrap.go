@@ -217,6 +217,7 @@ def user_shell(command):
 tool_commands = {
     "docker": ["docker", "--version"],
     "dockerCompose": ["docker", "compose", "version"],
+    "mosh": ["mosh-server", "--version"],
     "brew": user_command(["/home/linuxbrew/.linuxbrew/bin/brew", "--version"]),
     "tmux": ["/home/linuxbrew/.linuxbrew/bin/tmux", "-V"],
     "jq": ["/home/linuxbrew/.linuxbrew/bin/jq", "--version"],
@@ -270,7 +271,7 @@ func writePersonalServerBootstrapSteps(b *strings.Builder, input personalServerB
 	fmt.Fprintln(b, `export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg lsb-release unattended-upgrades apt-transport-https build-essential procps file git sudo
+apt-get install -y ca-certificates curl gnupg lsb-release unattended-upgrades apt-transport-https build-essential procps file git sudo mosh
 apt-get -y upgrade
 systemctl enable --now unattended-upgrades
 cat >/etc/apt/apt.conf.d/20auto-upgrades <<'APTCONF'
