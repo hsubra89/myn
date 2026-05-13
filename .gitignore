@@ -1,3 +1,4 @@
 remote-ssh.txt
 .env.local
 ./ralph
+.scratch/
