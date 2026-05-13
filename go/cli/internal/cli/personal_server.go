@@ -628,7 +628,7 @@ func writePersonalServerSSHCommand(out io.Writer, label string, identityFile str
 		fmt.Fprintf(out, "- %s: unavailable\n", label)
 		return
 	}
-	fmt.Fprintf(out, "- %s: ssh -i ~/%s %s@%s\n", label, identityFile, user, personalServerSSHCommandHost(host))
+	fmt.Fprintf(out, "- %s: %s\n", label, personalServerSSHCommandText("~/"+identityFile, user, host))
 }
 
 func writePersonalServerMoshCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
@@ -647,16 +647,7 @@ func writePersonalServerMoshCommand(out io.Writer, label string, identityFile st
 }
 
 func personalServerBootstrapHost(server personalServerCloudServer) string {
-	if strings.TrimSpace(server.IPv4) != "" {
-		return strings.TrimSpace(server.IPv4)
-	}
-	return strings.TrimSpace(server.IPv6)
-}
-
-func personalServerSSHCommandHost(host string) string {
-	// OpenSSH accepts IPv6 literals directly in user@host targets; brackets are
-	// treated as hostname characters and fail DNS resolution.
-	return strings.TrimSpace(host)
+	return personalServerSSHHost(server.IPv4, server.IPv6)
 }
 
 func (gate personalServerProvisioningGate) personalServerSSHRunner() personalServerSSHRunner {
@@ -667,15 +658,13 @@ func (gate personalServerProvisioningGate) personalServerSSHRunner() personalSer
 }
 
 func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-	sshHost := user + "@" + personalServerSSHCommandHost(host)
-	cmd := exec.CommandContext(ctx, "ssh",
+	args := personalServerSSHCommandArgs(identityFile, user, host,
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
-		"-i", identityFile,
-		sshHost,
-		command,
 	)
+	args = append(args, command)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", commandOutputError("ssh", output, err)

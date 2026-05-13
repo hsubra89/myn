@@ -143,10 +143,7 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 		return connectPlan{}, fmt.Errorf("Personal Server Configuration is missing Personal Server User; run `myn configure`")
 	}
 
-	host := strings.TrimSpace(cfg.PersonalServer.IPv4)
-	if host == "" {
-		host = strings.TrimSpace(cfg.PersonalServer.IPv6)
-	}
+	host := personalServerSSHHost(cfg.PersonalServer.IPv4, cfg.PersonalServer.IPv6)
 	if host == "" {
 		return connectPlan{}, fmt.Errorf("Personal Server Configuration is missing a saved Personal Server address; run `myn configure`")
 	}
@@ -242,15 +239,14 @@ func validateExistingRegularFile(stat func(string) (os.FileInfo, error), value s
 }
 
 func connectSSHCommand(plan connectPlan) []string {
-	return []string{
-		"ssh",
+	command := personalServerSSHCommandArgs(
+		plan.sshIdentityPath,
+		plan.sshUser,
+		plan.sshHost,
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-i", plan.sshIdentityPath,
-		"-l", plan.sshUser,
-		strings.TrimSpace(plan.sshHost),
-		"bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan)),
-	}
+	)
+	return append(command, "bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan)))
 }
 
 func connectRemoteHandoffCommand(plan connectPlan) string {

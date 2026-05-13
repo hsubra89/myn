@@ -145,7 +145,7 @@ _Avoid_: prompt lease, terminal lock
 - Missing **Hetzner Credentials** do not block saving local configuration; they only skip **Personal Server** creation.
 - Interactive `configure` asks for explicit final confirmation before creating a **Personal Server**.
 - A created **Personal Server** is saved in **Personal Server Configuration** even if the **Personal Server Bootstrap** fails or times out.
-- `myn configure` reports user and root SSH commands with `-i` for the configured SSH identity for both IPv4 and IPv6 after **Personal Server** creation, with IPv4 first.
+- `myn configure` reports user and root SSH commands with `-i` for the configured SSH identity and `-l` for the login user for both IPv4 and IPv6 after **Personal Server** creation, with IPv4 first.
 - `myn configure` reports **Mosh Access** commands for the **Personal Server User** after **Personal Server** creation, with IPv4 first and the configured SSH identity passed explicitly.
 - `myn configure` reports **Mosh Access** commands only after successful **Personal Server Bootstrap**.
 - `myn configure` saves local roots and SSH identity before attempting **Personal Server** creation, then saves **Personal Server Configuration** after server creation succeeds.

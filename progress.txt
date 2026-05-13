@@ -31,7 +31,7 @@
 
 2026-05-13 - Issue 5: Complete Host Selection and Connection Documentation
 
-- Added explicit Personal Server Connection tests for IPv4 preference, IPv6 fallback, bracketed IPv6 SSH targets, and running without Hetzner Credentials, Mosh Access, or Idle/Stdio Lease files.
+- Added explicit Personal Server Connection tests for IPv4 preference, IPv6 fallback, unbracketed IPv6 SSH host arguments, and running without Hetzner Credentials, Mosh Access, or Idle/Stdio Lease files.
 - Updated the CLI README to document `myn connect`/`myn c`, local-to-remote path mapping, project-scoped tmux session behavior, saved Personal Server User config, host selection, local validation, and initial limits.
 - Marked Issue 5 complete in `issues.md`.
 - Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
@@ -49,3 +49,11 @@
 - Updated `CONTEXT.md` so Personal Server Connection IPv6 behavior says SSH receives the Personal Server User via `-l` and an unbracketed host argument.
 - Marked Issue 6 complete in `issues.md`.
 - Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
+
+2026-05-13 - Architecture: Deepen Personal Server SSH target construction
+
+- Added a Personal Server SSH target module that owns IPv4-before-IPv6 host selection, executable SSH argv construction, and printed SSH command text.
+- Routed `myn connect`, Personal Server bootstrap SSH polling, live validation SSH, and provisioning SSH command output through the shared module.
+- Switched printed SSH commands to use `-l <user> <host>` so executable and displayed Personal Server SSH forms share the unbracketed host rule.
+- Updated Personal Server SSH target tests and the domain/README wording for provisioning SSH command output.
+- Verified with `go test ./...`, `go build ./...`, and `git diff --check`.

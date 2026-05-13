@@ -187,9 +187,10 @@ inspected.
 
 When provisioning finishes successfully, `configure` prints SSH commands for
 the Personal Server User and root over IPv4 and IPv6, IPv4 first. Each SSH
-command includes `-i` with the configured SSH identity. It also prints Mosh
-commands for the Personal Server User with the configured SSH identity passed
-through `--ssh`.
+command includes `-i` with the configured SSH identity and `-l` with the login
+user, so IPv6 addresses are passed as unbracketed host arguments. It also
+prints Mosh commands for the Personal Server User with the configured SSH
+identity passed through `--ssh`.
 
 `myn` creates or reuses the `myn-personal-server` firewall and a Hetzner SSH key
 resource for the configured SSH identity. A newly created firewall allows
