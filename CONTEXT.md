@@ -136,10 +136,10 @@ _Avoid_: prompt lease, terminal lock
 - Hetzner API calls, root SSH polling, and bootstrap polling respect command cancellation.
 - A **Personal Server Configuration** belongs in its own top-level config section.
 - A **Personal Server Configuration** stores `serverID`, **Personal Server User**, `ipv4`, and the assigned `ipv6` address, not ongoing desired state for mutable server details.
-- A **Personal Server Configuration** is incomplete without the **Personal Server User**.
+- A **Personal Server Configuration** is incomplete for connection without `serverID`, **Personal Server User**, and at least one saved address.
 - **Location**, **Server Type**, and proposed server name selections are transient until a **Personal Server** is created.
-- When **Personal Server Configuration** already has a server ID, `myn configure` skips creation by default and reports the saved server ID and IP addresses.
-- A saved **Personal Server** server ID is verified against Hetzner before creation is skipped.
+- When **Personal Server Configuration** is complete for connection, `myn configure` skips creation by default and reports the saved server ID and IP addresses.
+- A complete saved **Personal Server Configuration** server ID is verified against Hetzner before creation is skipped.
 - If a saved **Personal Server** server ID is missing in Hetzner, interactive `configure` asks before clearing it and non-interactive `configure` fails.
 - **Personal Server** creation is interactive-only; non-interactive `configure` does not create a server.
 - Missing **Hetzner Credentials** do not block saving local configuration; they only skip **Personal Server** creation.

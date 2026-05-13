@@ -56,7 +56,7 @@ The command is intentionally narrow in the first implementation: it accepts no p
 ## Implementation Decisions
 
 - Add `connect` as the canonical command and `c` as its alias. The command accepts no positional arguments in the initial implementation.
-- Extend Personal Server Configuration to store the Personal Server User alongside server ID and saved addresses. A Personal Server Configuration without the Personal Server User is incomplete.
+- Extend Personal Server Configuration to store the Personal Server User alongside server ID and saved addresses. A Personal Server Configuration without server ID, Personal Server User, and at least one saved address is incomplete for connection.
 - Update the provisioning save path so a newly created Personal Server persists the Personal Server User after server creation succeeds, including the case where Personal Server Bootstrap later fails or times out.
 - Add a deep Personal Server Connection planning module with a compact interface that accepts saved configuration, current working directory, user home directory, and local filesystem checks, and returns a connection plan or a local validation error.
 - The connection plan should include the SSH user, selected host, SSH identity path, remote exact path, remote Project root, tmux session name, and remote handoff command.
@@ -92,7 +92,7 @@ The command is intentionally narrow in the first implementation: it accepts no p
 - Unit test remote path fallback command construction for exact path, Project root, and home fallback.
 - Unit test tmux session name normalization for lowercase, uppercase, spaces, punctuation, slashes, repeated separators, edge separators, and empty normalized values.
 - Unit test SSH host selection for IPv4 preference, IPv6 fallback, missing addresses, unbracketed IPv6 host arguments, and separate `-l` user arguments.
-- Unit test configuration validation for missing local root, missing remote root, missing SSH identity, missing Personal Server Configuration, missing Personal Server User, missing saved address, missing local root directory, and missing SSH identity file.
+- Unit test configuration validation for missing local root, missing remote root, missing SSH identity, incomplete Personal Server Configuration, missing saved address, missing local root directory, and missing SSH identity file.
 - Unit test command registration so `connect` and `c` both route to the same behavior and reject positional arguments.
 - Unit test terminal validation so non-terminal stdin or stdout fails before SSH.
 - Unit test SSH process execution through a fake runner so the command passes the configured identity, TTY allocation, host key policy, user, host, and remote handoff command.

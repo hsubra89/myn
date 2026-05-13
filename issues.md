@@ -55,7 +55,7 @@ This slice should update the provisioning path end to end: when a Personal Serve
 - [x] Personal Server Configuration stores and reloads the Personal Server User alongside server ID, IPv4, and IPv6.
 - [x] A newly created Personal Server saves the Personal Server User before bootstrap polling can fail or time out.
 - [x] Existing configure behavior still skips creation when a saved Personal Server exists and still reports saved and current addresses.
-- [x] Personal Server Configuration without a Personal Server User is treated as incomplete for connection purposes.
+- [x] Personal Server Configuration without server ID, Personal Server User, and at least one saved address is treated as incomplete for connection purposes.
 - [x] Serialization, parsing, and provisioning tests cover the new Personal Server User field.
 
 ## Blocked by

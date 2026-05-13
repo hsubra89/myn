@@ -40,6 +40,20 @@ type personalServerConfig struct {
 	IPv6     string `json:"ipv6,omitempty"`
 }
 
+type personalServerConnectionConfigState int
+
+const (
+	personalServerConnectionConfigAbsent personalServerConnectionConfigState = iota
+	personalServerConnectionConfigIncomplete
+	personalServerConnectionConfigMissingAddress
+	personalServerConnectionConfigReady
+)
+
+type personalServerConnectionConfig struct {
+	User string
+	Host string
+}
+
 func (cfg appConfig) MarshalJSON() ([]byte, error) {
 	type appConfigJSON struct {
 		Auth           *authConfig           `json:"auth,omitempty"`
@@ -85,10 +99,33 @@ func (cfg personalServerConfig) isZero() bool {
 	return cfg.ServerID == 0 && cfg.User == "" && cfg.IPv4 == "" && cfg.IPv6 == ""
 }
 
-func (cfg personalServerConfig) isCompleteForConnection() bool {
-	return cfg.ServerID != 0 &&
-		strings.TrimSpace(cfg.User) != "" &&
-		(strings.TrimSpace(cfg.IPv4) != "" || strings.TrimSpace(cfg.IPv6) != "")
+func (cfg personalServerConfig) connectionConfigState() (personalServerConnectionConfigState, personalServerConnectionConfig) {
+	if cfg.isZero() {
+		return personalServerConnectionConfigAbsent, personalServerConnectionConfig{}
+	}
+	user := strings.TrimSpace(cfg.User)
+	if cfg.ServerID == 0 || user == "" {
+		return personalServerConnectionConfigIncomplete, personalServerConnectionConfig{}
+	}
+	host := personalServerSSHHost(cfg.IPv4, cfg.IPv6)
+	if host == "" {
+		return personalServerConnectionConfigMissingAddress, personalServerConnectionConfig{}
+	}
+	return personalServerConnectionConfigReady, personalServerConnectionConfig{
+		User: user,
+		Host: host,
+	}
+}
+
+func (state personalServerConnectionConfigState) validationError() error {
+	switch state {
+	case personalServerConnectionConfigAbsent, personalServerConnectionConfigIncomplete:
+		return fmt.Errorf("Personal Server Configuration is incomplete; run `myn configure`")
+	case personalServerConnectionConfigMissingAddress:
+		return fmt.Errorf("Personal Server Configuration is missing a saved Personal Server address; run `myn configure`")
+	default:
+		return nil
+	}
 }
 
 func defaultAppConfigPath(env func(string) string) (string, error) {

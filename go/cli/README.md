@@ -149,6 +149,9 @@ addresses:
 }
 ```
 
+The saved section is incomplete for connection unless it has `serverID`, the
+Personal Server User, and at least one saved address.
+
 Location, Server Type, server name, password, install choices, and pricing are
 transient provisioning inputs. They are not saved as desired state.
 

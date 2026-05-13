@@ -136,16 +136,9 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 	if strings.TrimSpace(cfg.SSH.IdentityFile) == "" {
 		return connectPlan{}, fmt.Errorf("SSH identity is not configured; run `myn configure`")
 	}
-	if cfg.PersonalServer.ServerID == 0 {
-		return connectPlan{}, fmt.Errorf("Personal Server Configuration is missing; run `myn configure`")
-	}
-	if strings.TrimSpace(cfg.PersonalServer.User) == "" {
-		return connectPlan{}, fmt.Errorf("Personal Server Configuration is missing Personal Server User; run `myn configure`")
-	}
-
-	host := personalServerSSHHost(cfg.PersonalServer.IPv4, cfg.PersonalServer.IPv6)
-	if host == "" {
-		return connectPlan{}, fmt.Errorf("Personal Server Configuration is missing a saved Personal Server address; run `myn configure`")
+	connectionState, connectionConfig := cfg.PersonalServer.connectionConfigState()
+	if connectionState != personalServerConnectionConfigReady {
+		return connectPlan{}, connectionState.validationError()
 	}
 
 	localRootPath, err := localProjectRootPath(cfg.Projects.LocalRoot, home)
@@ -186,8 +179,8 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 	}
 
 	return connectPlan{
-		sshUser:           strings.TrimSpace(cfg.PersonalServer.User),
-		sshHost:           host,
+		sshUser:           connectionConfig.User,
+		sshHost:           connectionConfig.Host,
 		sshIdentityPath:   identityPath,
 		remotePath:        remotePath,
 		remoteProjectRoot: remoteProjectRoot,

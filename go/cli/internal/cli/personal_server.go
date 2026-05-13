@@ -231,8 +231,12 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 		return nil
 	}
 
-	if cfg.PersonalServer.ServerID != 0 {
+	connectionState, _ := cfg.PersonalServer.connectionConfigState()
+	if connectionState == personalServerConnectionConfigReady {
 		return gate.verifyConfiguredPersonalServer(ctx, out, appConfigPath, cfg, token, prompter)
+	}
+	if connectionState != personalServerConnectionConfigAbsent {
+		return gate.clearIncompletePersonalServerConfiguration(ctx, out, appConfigPath, cfg, token, prompter, connectionState)
 	}
 
 	if !prompter.CanPrompt() {
@@ -240,6 +244,34 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 		return nil
 	}
 
+	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
+	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+}
+
+func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfiguration(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter, state personalServerConnectionConfigState) error {
+	switch state {
+	case personalServerConnectionConfigMissingAddress:
+		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Personal Server address.")
+	default:
+		fmt.Fprintln(out, "Personal Server Configuration is incomplete.")
+	}
+	if !prompter.CanPrompt() {
+		return state.validationError()
+	}
+
+	clear, err := prompter.Confirm("Clear incomplete Personal Server Configuration?", true)
+	if err != nil {
+		return err
+	}
+	if !clear {
+		return state.validationError()
+	}
+
+	cfg.PersonalServer = personalServerConfig{}
+	if err := gate.writeConfig(appConfigPath, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "Cleared incomplete Personal Server Configuration.")
 	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
 	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }

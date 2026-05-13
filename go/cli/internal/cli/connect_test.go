@@ -521,14 +521,14 @@ func TestConnectValidatesLocalPreconditionsBeforeSSH(t *testing.T) {
 			mutateCfg: func(cfg *appConfig) {
 				cfg.PersonalServer = personalServerConfig{}
 			},
-			want: "Personal Server Configuration is missing",
+			want: "Personal Server Configuration is incomplete",
 		},
 		{
-			name: "missing Personal Server User",
+			name: "incomplete Personal Server Configuration",
 			mutateCfg: func(cfg *appConfig) {
 				cfg.PersonalServer.User = ""
 			},
-			want: "missing Personal Server User",
+			want: "Personal Server Configuration is incomplete",
 		},
 		{
 			name: "missing saved address",
