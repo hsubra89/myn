@@ -4,3 +4,11 @@
 - Updated provisioning so created Personal Servers persist the selected Personal Server User with server ID, IPv4, and IPv6 before bootstrap polling can fail or time out.
 - Added a connection-completeness guard that treats Personal Server Configuration without a Personal Server User as incomplete.
 - Verified with `go test ./...` and `go build ./...` from `go/cli`.
+
+2026-05-13 - Issue 2: Connect from the Configured Project Root
+
+- Added `myn connect` with `myn c` as an alias and no positional arguments.
+- Implemented the configured-root Personal Server Connection slice: validates saved roots, SSH identity, Personal Server User/address, local root and identity file existence, and terminal-backed stdin/stdout before SSH.
+- Built the SSH-backed tmux handoff with one TTY allocation, `StrictHostKeyChecking=accept-new`, the configured identity, `bash -lc`, and quiet success behavior.
+- Added fake-backed tests for command routing, root-to-remote-root mapping, local validation, quiet handoff, and exit-status preservation.
+- Verified with `go test ./...` and `go build ./...` from `go/cli`.

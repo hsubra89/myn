@@ -12,14 +12,14 @@ Source: PRD: Project-Scoped Personal Server Connection
 
 2. **Title**: Connect from the Configured Project Root  
    **Type**: AFK  
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: Issue 1 (done)
    **User stories covered**: 1, 2, 5, 20, 22, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 38
 
 3. **Title**: Map Local Subdirectories to Project-Scoped Remote Targets  
    **Type**: AFK  
-   **Status**: Blocked
-   **Blocked by**: Issue 2  
+   **Status**: Ready
+   **Blocked by**: Issue 2 (done)
    **User stories covered**: 3, 4, 6, 7, 8, 14, 33
 
 4. **Title**: Reuse and Create Project-Scoped tmux Sessions  
@@ -31,7 +31,7 @@ Source: PRD: Project-Scoped Personal Server Connection
 5. **Title**: Complete Host Selection and Connection Documentation  
    **Type**: AFK  
    **Status**: Blocked
-   **Blocked by**: Issues 2, 3, and 4  
+   **Blocked by**: Issues 3 and 4  
    **User stories covered**: 21, 23, 24, 32, 33, 34
 
 ## Issue 1: Persist the Personal Server User in Personal Server Configuration
@@ -58,7 +58,7 @@ None - can start immediately.
 
 ## Issue 2: Connect from the Configured Project Root
 
-**Status**: Ready
+**Status**: Done
 
 ## What to build
 
@@ -70,18 +70,18 @@ On successful handoff, Myn should stay quiet and let SSH and tmux own the termin
 
 ## Acceptance criteria
 
-- [ ] `myn connect` and `myn c` route to the same command behavior.
-- [ ] The command rejects positional path arguments.
-- [ ] Running from the configured local project root maps to the configured remote project root.
-- [ ] The command validates saved local project root, remote project root, configured SSH identity, Personal Server User, and at least one saved Personal Server address before SSH.
-- [ ] The command validates that the local project root and configured SSH identity exist locally before SSH.
-- [ ] The command requires terminal-backed stdin and stdout before starting SSH.
-- [ ] The command starts SSH with the saved Personal Server User, configured SSH identity, one TTY allocation, and `StrictHostKeyChecking=accept-new`.
-- [ ] The remote handoff runs through Bash login-shell command evaluation and relies on the Personal Server User login shell PATH to find tmux.
-- [ ] The command fails rather than falling back to plain SSH when tmux is unavailable.
-- [ ] Successful handoff emits no Myn-specific success output before SSH takes over the terminal.
-- [ ] SSH and tmux process exit statuses are preserved.
-- [ ] Tests use fake dependencies for config loading, filesystem checks, terminal detection, and process execution.
+- [x] `myn connect` and `myn c` route to the same command behavior.
+- [x] The command rejects positional path arguments.
+- [x] Running from the configured local project root maps to the configured remote project root.
+- [x] The command validates saved local project root, remote project root, configured SSH identity, Personal Server User, and at least one saved Personal Server address before SSH.
+- [x] The command validates that the local project root and configured SSH identity exist locally before SSH.
+- [x] The command requires terminal-backed stdin and stdout before starting SSH.
+- [x] The command starts SSH with the saved Personal Server User, configured SSH identity, one TTY allocation, and `StrictHostKeyChecking=accept-new`.
+- [x] The remote handoff runs through Bash login-shell command evaluation and relies on the Personal Server User login shell PATH to find tmux.
+- [x] The command fails rather than falling back to plain SSH when tmux is unavailable.
+- [x] Successful handoff emits no Myn-specific success output before SSH takes over the terminal.
+- [x] SSH and tmux process exit statuses are preserved.
+- [x] Tests use fake dependencies for config loading, filesystem checks, terminal detection, and process execution.
 
 ## Blocked by
 
@@ -89,7 +89,7 @@ On successful handoff, Myn should stay quiet and let SSH and tmux own the termin
 
 ## Issue 3: Map Local Subdirectories to Project-Scoped Remote Targets
 
-**Status**: Blocked
+**Status**: Ready
 
 ## What to build
 
@@ -110,7 +110,7 @@ The target Project is the configured project root itself when the command runs f
 
 ## Blocked by
 
-- Issue 2: Connect from the Configured Project Root
+- Issue 2: Connect from the Configured Project Root (done)
 
 ## Issue 4: Reuse and Create Project-Scoped tmux Sessions
 
@@ -169,6 +169,5 @@ Update documentation so users can discover `myn connect` and `myn c`, understand
 
 ## Blocked by
 
-- Issue 2: Connect from the Configured Project Root
 - Issue 3: Map Local Subdirectories to Project-Scoped Remote Targets
 - Issue 4: Reuse and Create Project-Scoped tmux Sessions
