@@ -225,9 +225,11 @@ do not affect this. Running outside the configured local project root fails
 before SSH.
 
 The command connects over SSH, preferring the saved IPv4 address and falling
-back to the saved IPv6 address when IPv4 is unavailable. IPv6 SSH targets are
-bracketed, the configured SSH identity is passed with `-i`, SSH requests one
-TTY allocation, and host key checking uses `StrictHostKeyChecking=accept-new`.
+back to the saved IPv6 address when IPv4 is unavailable. The Personal Server
+User is passed to SSH with `-l`, so IPv6 addresses are passed as unbracketed
+host arguments. The configured SSH identity is passed with `-i`, SSH requests
+one TTY allocation, and host key checking uses
+`StrictHostKeyChecking=accept-new`.
 
 On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. It
 attaches to an existing project-scoped tmux session when one exists; otherwise

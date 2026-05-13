@@ -80,7 +80,8 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", identity.PrivatePath,
-		"harish@203.0.113.10",
+		"-l", "harish",
+		"203.0.113.10",
 		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
@@ -126,7 +127,8 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", fixture.identity.PrivatePath,
-		"harish@203.0.113.10",
+		"-l", "harish",
+		"203.0.113.10",
 		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if len(runner.requests) != 1 {
@@ -163,7 +165,8 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", "/home/harish/.ssh/id_ed25519",
-		"harish@203.0.113.10",
+		"-l", "harish",
+		"203.0.113.10",
 		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if !reflect.DeepEqual(command, wantCommand) {
@@ -173,10 +176,10 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 
 func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 	tests := []struct {
-		name          string
-		personal      personalServerConfig
-		wantPlanHost  string
-		wantSSHTarget string
+		name         string
+		personal     personalServerConfig
+		wantPlanHost string
+		wantSSHHost  string
 	}{
 		{
 			name: "prefers IPv4 before IPv6",
@@ -186,18 +189,18 @@ func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 				IPv4:     "203.0.113.10",
 				IPv6:     "2001:db8::10",
 			},
-			wantPlanHost:  "203.0.113.10",
-			wantSSHTarget: "harish@203.0.113.10",
+			wantPlanHost: "203.0.113.10",
+			wantSSHHost:  "203.0.113.10",
 		},
 		{
-			name: "falls back to unbracketed IPv6 target",
+			name: "falls back to unbracketed IPv6 host with separate login user",
 			personal: personalServerConfig{
 				ServerID: 123456,
 				User:     "harish",
 				IPv6:     "2001:db8::10",
 			},
-			wantPlanHost:  "2001:db8::10",
-			wantSSHTarget: "harish@2001:db8::10",
+			wantPlanHost: "2001:db8::10",
+			wantSSHHost:  "2001:db8::10",
 		},
 	}
 
@@ -219,11 +222,30 @@ func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 			if plan.sshHost != tt.wantPlanHost {
 				t.Fatalf("planned SSH host mismatch: want %q, got %q", tt.wantPlanHost, plan.sshHost)
 			}
-			if command := connectSSHCommand(plan); !containsString(command, tt.wantSSHTarget) {
-				t.Fatalf("SSH target %q missing from command %#v", tt.wantSSHTarget, command)
+			command := connectSSHCommand(plan)
+			assertConnectSSHLogin(t, command, tt.personal.User, tt.wantSSHHost)
+			for _, invalidTarget := range []string{
+				tt.personal.User + "@" + tt.wantSSHHost,
+				tt.personal.User + "@[" + tt.wantSSHHost + "]",
+				"[" + tt.wantSSHHost + "]",
+			} {
+				if containsString(command, invalidTarget) {
+					t.Fatalf("SSH command should pass login and host separately, got invalid target %q in %#v", invalidTarget, command)
+				}
 			}
 		})
 	}
+}
+
+func assertConnectSSHLogin(t *testing.T, command []string, user string, host string) {
+	t.Helper()
+
+	for i := 0; i+2 < len(command); i++ {
+		if command[i] == "-l" && command[i+1] == user && command[i+2] == host {
+			return
+		}
+	}
+	t.Fatalf("SSH login args missing: want -l %q %q in %#v", user, host, command)
 }
 
 func TestConnectTmuxSessionNameNormalizesRemoteProjectRoot(t *testing.T) {

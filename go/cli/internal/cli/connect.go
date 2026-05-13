@@ -247,7 +247,8 @@ func connectSSHCommand(plan connectPlan) []string {
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", plan.sshIdentityPath,
-		plan.sshUser + "@" + personalServerSSHCommandHost(plan.sshHost),
+		"-l", plan.sshUser,
+		strings.TrimSpace(plan.sshHost),
 		"bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan)),
 	}
 }

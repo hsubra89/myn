@@ -37,7 +37,7 @@ The command is intentionally narrow in the first implementation: it accepts no p
 21. As a Myn user, I want Mosh Access to remain available separately, so that the new command does not remove the existing access path.
 22. As a Myn user, I want `myn connect` to work without Hetzner Credentials, so that day-to-day access is not blocked by missing or expired cloud credentials.
 23. As a Myn user, I want the command to prefer the saved IPv4 address and use the saved IPv6 address only when IPv4 is unavailable, so that connection behavior matches existing provisioning output.
-24. As a Myn user, I want IPv6 SSH targets to be bracketed correctly, so that IPv6-only configurations can connect.
+24. As a Myn user, I want IPv6 SSH hosts to be passed unbracketed with the Personal Server User supplied separately, so that IPv6-only configurations can connect.
 25. As a Myn user, I want the configured SSH identity to always be passed with `-i`, so that SSH targets the key the Personal Server trusts.
 26. As a Myn user, I want SSH to use `StrictHostKeyChecking=accept-new`, so that first connection to a newly created Personal Server is smooth while changed host keys are still rejected.
 27. As a Myn user, I want `myn connect` to require terminal-backed stdin and stdout, so that tmux starts only in a real interactive terminal.
@@ -68,7 +68,7 @@ The command is intentionally narrow in the first implementation: it accepts no p
 - Derive the remote Project root from the configured remote project root plus the first local path segment when the command runs inside a top-level Project. Use the configured remote project root itself when the command runs from the root.
 - Build a tmux-safe session name from the remote Project root path by lowercasing, keeping ASCII letters and digits, converting every other character run to one hyphen, trimming edge hyphens, prefixing `myn-`, and using `myn-project` if the normalized project path is empty.
 - Select the saved IPv4 address first. Select the saved IPv6 address only when IPv4 is unavailable.
-- Bracket IPv6 literals when building SSH targets.
+- Pass the Personal Server User to SSH with `-l` and pass the selected host as a separate unbracketed argument, including for IPv6 literals.
 - Build SSH with the configured identity explicitly, one TTY allocation, and `StrictHostKeyChecking=accept-new`.
 - Do not require Hetzner Credentials and do not verify the saved server through the Hetzner API before connecting.
 - Run the remote handoff through Bash login-shell command evaluation so that the Personal Server User login shell PATH is used to find tmux.
@@ -91,7 +91,7 @@ The command is intentionally narrow in the first implementation: it accepts no p
 - Unit test Project derivation separately from Git repository state to ensure Git roots do not influence connection behavior.
 - Unit test remote path fallback command construction for exact path, Project root, and home fallback.
 - Unit test tmux session name normalization for lowercase, uppercase, spaces, punctuation, slashes, repeated separators, edge separators, and empty normalized values.
-- Unit test SSH host selection for IPv4 preference, IPv6 fallback, missing addresses, and IPv6 bracket formatting.
+- Unit test SSH host selection for IPv4 preference, IPv6 fallback, missing addresses, unbracketed IPv6 host arguments, and separate `-l` user arguments.
 - Unit test configuration validation for missing local root, missing remote root, missing SSH identity, missing Personal Server Configuration, missing Personal Server User, missing saved address, missing local root directory, and missing SSH identity file.
 - Unit test command registration so `connect` and `c` both route to the same behavior and reject positional arguments.
 - Unit test terminal validation so non-terminal stdin or stdout fails before SSH.

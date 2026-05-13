@@ -1,7 +1,3 @@
-# Review notes
-
-- Fix IPv6-only `myn connect` SSH handoff before treating Issue 5 as complete: OpenSSH treats `user@[IPv6]` as hostname `[IPv6]`, so build SSH argv with the user passed separately (for example, `-l <user> <unbracketed IPv6>`) and update tests/docs that currently expect bracketed IPv6 SSH targets.
-
 # Issues: Project-Scoped Personal Server Connection
 
 Source: PRD: Project-Scoped Personal Server Connection
@@ -154,7 +150,7 @@ When creating a new session, choose the starting directory on the Personal Serve
 
 Finish the Personal Server Connection behavior by covering saved address selection, IPv6 SSH target formatting, and user-facing documentation.
 
-The command should prefer the saved IPv4 address. If IPv4 is unavailable, it should use the saved IPv6 address and bracket IPv6 literals when building SSH targets. Mosh Access remains available separately, but `myn connect` is SSH-backed and should not use Mosh. The initial implementation should not create an Idle Lease or Stdio Lease.
+The command should prefer the saved IPv4 address. If IPv4 is unavailable, it should use the saved IPv6 address as an unbracketed SSH host argument and pass the Personal Server User separately with `-l`. Mosh Access remains available separately, but `myn connect` is SSH-backed and should not use Mosh. The initial implementation should not create an Idle Lease or Stdio Lease.
 
 Update documentation so users can discover `myn connect` and `myn c`, understand the project-scoped tmux behavior, and know the important limits: no path arguments, no remote directory creation, no Hetzner verification, no Mosh use, and no Idle Lease in the initial implementation.
 
@@ -162,14 +158,14 @@ Update documentation so users can discover `myn connect` and `myn c`, understand
 
 - [x] Saved IPv4 is selected before saved IPv6.
 - [x] Saved IPv6 is selected when IPv4 is unavailable.
-- [x] IPv6 literals are bracketed correctly in SSH targets.
+- [x] IPv6 literals are passed as unbracketed SSH host arguments with the Personal Server User supplied separately.
 - [x] Missing saved addresses fail before SSH with clear messaging.
 - [x] `myn connect` does not require Hetzner Credentials and does not call the Hetzner API.
 - [x] `myn connect` does not create an Idle Lease or Stdio Lease.
 - [x] User-facing documentation describes `myn connect` and `myn c`.
 - [x] User-facing documentation describes local-to-remote path mapping and project-scoped tmux sessions.
 - [x] User-facing documentation describes the initial limits and failure behavior.
-- [x] Tests cover IPv4 preference, IPv6 fallback, IPv6 bracket formatting, missing addresses, and no Hetzner dependency.
+- [x] Tests cover IPv4 preference, IPv6 fallback, unbracketed IPv6 host arguments, missing addresses, and no Hetzner dependency.
 
 ## Blocked by
 

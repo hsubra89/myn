@@ -35,3 +35,10 @@
 - Updated the CLI README to document `myn connect`/`myn c`, local-to-remote path mapping, project-scoped tmux session behavior, saved Personal Server User config, host selection, local validation, and initial limits.
 - Marked Issue 5 complete in `issues.md`.
 - Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
+
+2026-05-13 - Review note fixup: IPv6-only `myn connect` SSH handoff
+
+- Changed `myn connect` SSH argv to pass the Personal Server User with `-l` and the selected host as a separate unbracketed argument, including IPv6 hosts.
+- Updated focused connect tests and user-facing docs/PRD language away from bracketed IPv6 SSH targets.
+- Removed the resolved review-note queue from `issues.md`.
+- Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.
