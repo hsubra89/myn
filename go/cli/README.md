@@ -32,8 +32,10 @@ myn version
 ```
 
 This creates `~/.local/bin/myn` as a launcher for this checkout. It runs
-`go run ./cmd/myn`, so local source changes are picked up automatically. Use
-`../../scripts/mount-myn-cli --unmount` to remove it.
+a temporary dev binary built from this checkout, so local source changes are
+picked up automatically while cwd-sensitive commands still see the directory
+where `myn` was invoked. Use `../../scripts/mount-myn-cli --unmount` to remove
+it.
 
 ## Configure
 
