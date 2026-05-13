@@ -183,6 +183,7 @@ type personalServerCreationPlan struct {
 	GitIdentity                personalServerGitIdentity
 	RemoteProjectRoot          string
 	SSHIdentityFile            string
+	ExistingFirewall           bool
 	PrimaryIPv4MonthlyGrossEUR string
 }
 
@@ -347,6 +348,13 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			RemoteProjectRoot: cfg.Projects.RemoteRoot,
 			SSHIdentityFile:   cfg.SSH.IdentityFile,
 		}
+		if createClient, ok := client.(personalServerCreateCloudClient); ok {
+			existingFirewall, err := personalServerFirewallExists(ctx, createClient)
+			if err != nil {
+				return err
+			}
+			plan.ExistingFirewall = existingFirewall
+		}
 		plan.PrimaryIPv4MonthlyGrossEUR, _ = personalServerPrimaryIPMonthlyGrossText(
 			pricing,
 			string(hcloud.PrimaryIPTypeIPv4),
@@ -460,6 +468,7 @@ func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPat
 
 const (
 	personalServerFirewallName         = "me-personal-server"
+	personalServerMoshUDPPortRange     = "60000-61000"
 	personalServerSSHKeyName           = "me-personal-server"
 	personalServerBootstrapMarkerPath  = "/var/lib/me/personal-server-bootstrap.json"
 	defaultPersonalServerBootstrapWait = 5 * time.Minute
@@ -553,6 +562,7 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 		writePersonalServerToolVersions(out, marker.ToolVersions)
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
 		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerMoshCommands(out, plan, server)
 		return nil
 	case "failed":
 		fmt.Fprintln(out, "Personal Server bootstrap failed.")
@@ -618,6 +628,21 @@ func writePersonalServerSSHCommand(out io.Writer, label string, identityFile str
 		return
 	}
 	fmt.Fprintf(out, "- %s: ssh -i ~/%s %s@%s\n", label, identityFile, user, personalServerSSHCommandHost(host))
+}
+
+func writePersonalServerMoshCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
+	fmt.Fprintln(out, "Mosh commands:")
+	writePersonalServerMoshCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
+	writePersonalServerMoshCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
+}
+
+func writePersonalServerMoshCommand(out io.Writer, label string, identityFile string, user string, host string) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		fmt.Fprintf(out, "- %s: unavailable\n", label)
+		return
+	}
+	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -i ~/%s\" %s@%s\n", label, identityFile, user, host)
 }
 
 func personalServerBootstrapHost(server personalServerCloudServer) string {
@@ -800,6 +825,7 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 		Labels: personalServerResourceLabels(),
 		Rules: []personalServerFirewallRule{
 			{Direction: "in", Protocol: "tcp", Port: "22", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
+			{Direction: "in", Protocol: "udp", Port: personalServerMoshUDPPortRange, SourceIPs: []string{"0.0.0.0/0", "::/0"}},
 		},
 	})
 	if err != nil {
@@ -809,6 +835,14 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 		return personalServerFirewall{}, fmt.Errorf("wait for Personal Server Firewall create actions: %w", err)
 	}
 	return firewall, nil
+}
+
+func personalServerFirewallExists(ctx context.Context, client personalServerCreateCloudClient) (bool, error) {
+	_, found, err := client.FirewallByName(ctx, personalServerFirewallName)
+	if err != nil {
+		return false, fmt.Errorf("find Personal Server Firewall: %w", err)
+	}
+	return found, nil
 }
 
 func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreateCloudClient, identity sshIdentityCandidate) (personalServerSSHKey, error) {
@@ -1153,12 +1187,17 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintf(out, "Personal Server User: %s\n", plan.User)
 	fmt.Fprintln(out, "SSH and network:")
 	fmt.Fprintf(out, "SSH key: ~/%s\n", plan.SSHIdentityFile)
-	fmt.Fprintln(out, "Firewall: me-personal-server (inbound SSH over IPv4 and IPv6)")
+	if plan.ExistingFirewall {
+		fmt.Fprintf(out, "Firewall: %s (existing rules reused unchanged; Mosh may require inbound UDP %s)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+	} else {
+		fmt.Fprintf(out, "Firewall: %s (inbound SSH and Mosh UDP %s over IPv4 and IPv6)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+	}
 	fmt.Fprintln(out, "Public network: IPv4 and IPv6 enabled")
 	fmt.Fprintf(out, "Remote project root: ~/%s\n", plan.RemoteProjectRoot)
 	fmt.Fprintln(out, "Install plan:")
 	fmt.Fprintln(out, "System services:")
 	fmt.Fprintln(out, "- security updates and unattended security upgrades")
+	fmt.Fprintln(out, "- Mosh Access")
 	fmt.Fprintln(out, "- Docker Engine and Docker Compose")
 	fmt.Fprintln(out, "- Personal Server User in docker group (root-equivalent access)")
 	fmt.Fprintln(out, "- Homebrew")

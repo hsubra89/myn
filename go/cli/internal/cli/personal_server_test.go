@@ -520,12 +520,13 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Server name: harish-dev",
 		"Personal Server User: harish-subra",
 		"SSH key: ~/.ssh/id_ed25519",
-		"Firewall: me-personal-server (inbound SSH over IPv4 and IPv6)",
+		"Firewall: me-personal-server (inbound SSH and Mosh UDP 60000-61000 over IPv4 and IPv6)",
 		"Public network: IPv4 and IPv6 enabled",
 		"Remote project root: ~/Remote Projects",
 		"Install plan:",
 		"System services:",
 		"- security updates and unattended security upgrades",
+		"- Mosh Access",
 		"- Docker Engine and Docker Compose",
 		"- Homebrew",
 		"Homebrew tools:",
@@ -730,6 +731,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	}
 	if got, want := cloud.createdFirewall.Rules, []personalServerFirewallRule{
 		{Direction: "in", Protocol: "tcp", Port: "22", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
+		{Direction: "in", Protocol: "udp", Port: "60000-61000", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("created firewall rules mismatch: want %#v, got %#v", want, got)
 	}
@@ -825,6 +827,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
   "rebootRequired": true,
   "toolVersions": {
     "docker": "Docker version 28.1.0",
+    "mosh": "mosh-server (mosh 1.4.0)",
     "node": "v24.0.0"
   },
   "partialFailures": ["Claude Code install failed"]
@@ -885,6 +888,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"Reboot required: true",
 		"Installed tool versions:",
 		"- docker: Docker version 28.1.0",
+		"- mosh: mosh-server (mosh 1.4.0)",
 		"- node: v24.0.0",
 		"Partial bootstrap failures:",
 		"- Claude Code install failed",
@@ -893,6 +897,9 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"- root IPv4: ssh -i ~/.ssh/id_ed25519 root@203.0.113.55",
 		"- user IPv6: ssh -i ~/.ssh/id_ed25519 harish@[2001:db8::55]",
 		"- root IPv6: ssh -i ~/.ssh/id_ed25519 root@[2001:db8::55]",
+		"Mosh commands:",
+		"- user IPv4: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
+		"- user IPv6: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1063,6 +1070,9 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
 	}
+	if strings.Contains(output, "Mosh commands:") {
+		t.Fatalf("bootstrap failure should not print Mosh commands, got %q", output)
+	}
 }
 
 func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
@@ -1145,6 +1155,9 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
+	}
+	if strings.Contains(output, "Mosh commands:") {
+		t.Fatalf("bootstrap timeout should not print Mosh commands, got %q", output)
 	}
 }
 
@@ -1675,6 +1688,9 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 	}
 	if got, want := cloud.serverCreateRequest.SSHKeyID, existingSSHKey.ID; got != want {
 		t.Fatalf("server create SSH key mismatch: want %d, got %d", want, got)
+	}
+	if !strings.Contains(out.String(), "Firewall: me-personal-server (existing rules reused unchanged; Mosh may require inbound UDP 60000-61000)") {
+		t.Fatalf("expected existing firewall caveat in output, got %q", out.String())
 	}
 }
 

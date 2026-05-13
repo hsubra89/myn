@@ -28,6 +28,10 @@ _Avoid_: SSH-only firewall, generated firewall
 A Hetzner Cloud SSH key resource created from the configured local SSH identity for **Personal Server** access.
 _Avoid_: remote key, uploaded key
 
+**Mosh Access**:
+UDP-based interactive shell access installed and opened by default for a **Personal Server**.
+_Avoid_: optional roaming shell, manual UDP access
+
 **Personal Server User**:
 A Linux user account created on a **Personal Server** from a normalized form of the current local username.
 _Avoid_: remote user, cloud user
@@ -85,13 +89,18 @@ _Avoid_: prompt lease, terminal lock
 - Interactive `configure` asks for explicit final confirmation before creating a **Personal Server**.
 - A created **Personal Server** is saved in **Personal Server Configuration** even if the **Personal Server Bootstrap** fails or times out.
 - `me configure` reports user and root SSH commands with `-i` for the configured SSH identity for both IPv4 and IPv6 after **Personal Server** creation, with IPv4 first.
+- `me configure` reports **Mosh Access** commands for the **Personal Server User** after **Personal Server** creation, with IPv4 first and the configured SSH identity passed explicitly.
+- `me configure` reports **Mosh Access** commands only after successful **Personal Server Bootstrap**.
 - `me configure` saves local roots and SSH identity before attempting **Personal Server** creation, then saves **Personal Server Configuration** after server creation succeeds.
 - After **Personal Server Bootstrap** completes, `me configure` reports installed tool versions from the completion marker.
 - **Personal Server** provisioning is implemented separately from local root and SSH identity configuration.
 - A **Personal Server Firewall** is created by `me` with an initially minimal rule set and may be expanded by the user.
 - A **Personal Server Firewall** can be reused by multiple **Personal Server** instances over time.
 - An existing **Personal Server Firewall** is treated as user-editable and is not reset by `me`.
-- A newly created **Personal Server Firewall** allows inbound SSH from all IPv4 and IPv6 sources and no other inbound access.
+- A newly created **Personal Server Firewall** allows inbound SSH and **Mosh Access** from all IPv4 and IPv6 sources and no other inbound access.
+- **Mosh Access** uses Mosh's default UDP `60000-61000` port range.
+- Existing **Personal Server Firewalls** are not modified to add **Mosh Access**.
+- When `me configure` reuses an existing **Personal Server Firewall**, it reports that firewall rules are left untouched and **Mosh Access** may require the user-managed UDP rule.
 - A **Personal Server SSH Key** is reused when Hetzner already has the same public key fingerprint.
 - Supporting resources created for a **Personal Server** are not automatically cleaned up if server creation fails.
 - A **Personal Server User** is derived from the current local username as a lowercase letters, digits, and hyphens value.
@@ -107,9 +116,11 @@ _Avoid_: prompt lease, terminal lock
 - A **Personal Server Bootstrap** runs through cloud-init during server creation.
 - **Personal Server Bootstrap** cloud-init user data is rendered through a typed Go render function using a YAML library.
 - A **Personal Server Bootstrap** installs the latest Ubuntu security updates after the **Personal Server** is created, enables unattended security upgrades, and reboots automatically if required.
+- **Personal Server Bootstrap** installs `mosh` as an apt-managed system package for **Mosh Access**.
 - A **Personal Server Bootstrap** installs Docker Engine and the compose plugin from Docker's official apt repository.
 - **Personal Server** creation is not considered complete until the **Personal Server Bootstrap** finishes.
 - The **Personal Server Bootstrap** writes a completion marker with status, timestamp, reboot information, and installed tool versions that `me` polls for over root SSH.
+- The **Personal Server Bootstrap** completion marker reports the installed `mosh` version.
 - The **Personal Server Bootstrap** must finish within five minutes after the **Personal Server** first accepts root SSH.
 - Automatic reboot downtime counts against the five-minute **Personal Server Bootstrap** timeout.
 - The **Personal Server Bootstrap** install plan is shown before final creation confirmation.
@@ -126,6 +137,7 @@ _Avoid_: prompt lease, terminal lock
 - Claude Code is installed as the **Personal Server User** with its official installer script.
 - Coding agent installation failures do not fail the **Personal Server Bootstrap**; they are reported as partial failures.
 - **Personal Server Bootstrap** hard-fails system update/security setup, user creation, SSH authorization, remote project root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup.
+- **Personal Server Bootstrap** hard-fails `mosh` installation because **Mosh Access** is default Personal Server access.
 - A **Stdio Lease** is active only while the wrapped command still exists and terminal input or output is recent.
 - A quiet **Stdio Lease** can become idle while the wrapped command is still waiting at a prompt.
 - A completed **Stdio Lease** is removed on normal wrapper exit.
@@ -167,6 +179,10 @@ _Avoid_: prompt lease, terminal lock
 > **Domain expert:** "No — make it obvious `me` created it, but leave room for the user to expand it later."
 > **Dev:** "If the firewall already exists, should `me` restore SSH-only rules?"
 > **Domain expert:** "No — existing rules may be intentional user edits."
+> **Dev:** "Should **Mosh Access** be a manual post-provisioning step?"
+> **Domain expert:** "No — every newly created **Personal Server** should support **Mosh Access** by default."
+> **Dev:** "Should reusing an existing **Personal Server Firewall** ask for another confirmation because **Mosh Access** may need a UDP rule?"
+> **Domain expert:** "No — mention the unchanged firewall rules in the creation plan instead of adding another prompt."
 > **Dev:** "Should initial SSH access be source-restricted?"
 > **Domain expert:** "No — allow SSH from all IPv4 and IPv6 sources."
 > **Dev:** "Can we rely only on cloud-init for SSH access?"
