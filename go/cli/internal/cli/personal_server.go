@@ -654,10 +654,9 @@ func personalServerBootstrapHost(server personalServerCloudServer) string {
 }
 
 func personalServerSSHCommandHost(host string) string {
-	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
-		return "[" + host + "]"
-	}
-	return host
+	// OpenSSH accepts IPv6 literals directly in user@host targets; brackets are
+	// treated as hostname characters and fail DNS resolution.
+	return strings.TrimSpace(host)
 }
 
 func (gate personalServerProvisioningGate) personalServerSSHRunner() personalServerSSHRunner {

@@ -190,14 +190,14 @@ func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 			wantSSHTarget: "harish@203.0.113.10",
 		},
 		{
-			name: "falls back to bracketed IPv6 target",
+			name: "falls back to unbracketed IPv6 target",
 			personal: personalServerConfig{
 				ServerID: 123456,
 				User:     "harish",
 				IPv6:     "2001:db8::10",
 			},
 			wantPlanHost:  "2001:db8::10",
-			wantSSHTarget: "harish@[2001:db8::10]",
+			wantSSHTarget: "harish@2001:db8::10",
 		},
 	}
 
