@@ -65,13 +65,23 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 	if len(runner.requests) != 1 {
 		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 	}
+	wantRemoteCommand := strings.Join([]string{
+		"if tmux has-session -t '=myn-remote-projects' 2>/dev/null; then",
+		"  exec tmux attach-session -t '=myn-remote-projects'",
+		"fi",
+		`start_dir="$HOME"`,
+		`if [ -d "$HOME"/'Remote Projects' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects'`,
+		"fi",
+		`exec tmux new-session -s 'myn-remote-projects' -c "$start_dir"`,
+	}, "\n")
 	wantCommand := []string{
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", identity.PrivatePath,
 		"harish@203.0.113.10",
-		"bash", "-lc", `'exec tmux new-session -A -s myn-project -c $HOME/'\''Remote Projects'\'''`,
+		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
 		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, got)
@@ -99,19 +109,133 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 		t.Fatalf("connect: %v", err)
 	}
 
+	wantRemoteCommand := strings.Join([]string{
+		"if tmux has-session -t '=myn-remote-projects-acme' 2>/dev/null; then",
+		"  exec tmux attach-session -t '=myn-remote-projects-acme'",
+		"fi",
+		`start_dir="$HOME"`,
+		`if [ -d "$HOME"/'Remote Projects/acme/api/src' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/acme/api/src'`,
+		`elif [ -d "$HOME"/'Remote Projects/acme' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/acme'`,
+		"fi",
+		`exec tmux new-session -s 'myn-remote-projects-acme' -c "$start_dir"`,
+	}, "\n")
 	wantCommand := []string{
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", fixture.identity.PrivatePath,
 		"harish@203.0.113.10",
-		"bash", "-lc", `'exec tmux new-session -A -s myn-project -c $HOME/'\''Remote Projects/acme/api/src'\'''`,
+		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if len(runner.requests) != 1 {
 		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
 		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, got)
+	}
+}
+
+func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t *testing.T) {
+	command := connectSSHCommand(connectPlan{
+		sshUser:           "harish",
+		sshHost:           "203.0.113.10",
+		sshIdentityPath:   "/home/harish/.ssh/id_ed25519",
+		remotePath:        "Remote Projects/acme/api/src",
+		remoteProjectRoot: "Remote Projects/acme",
+	})
+
+	wantRemoteCommand := strings.Join([]string{
+		"if tmux has-session -t '=myn-remote-projects-acme' 2>/dev/null; then",
+		"  exec tmux attach-session -t '=myn-remote-projects-acme'",
+		"fi",
+		`start_dir="$HOME"`,
+		`if [ -d "$HOME"/'Remote Projects/acme/api/src' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/acme/api/src'`,
+		`elif [ -d "$HOME"/'Remote Projects/acme' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/acme'`,
+		"fi",
+		`exec tmux new-session -s 'myn-remote-projects-acme' -c "$start_dir"`,
+	}, "\n")
+	wantCommand := []string{
+		"ssh",
+		"-t",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-i", "/home/harish/.ssh/id_ed25519",
+		"harish@203.0.113.10",
+		"bash", "-lc", shellQuote(wantRemoteCommand),
+	}
+	if !reflect.DeepEqual(command, wantCommand) {
+		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, command)
+	}
+}
+
+func TestConnectTmuxSessionNameNormalizesRemoteProjectRoot(t *testing.T) {
+	tests := []struct {
+		name              string
+		remoteProjectRoot string
+		want              string
+	}{
+		{
+			name:              "uppercase letters become lowercase",
+			remoteProjectRoot: "Projects/ACME/API",
+			want:              "myn-projects-acme-api",
+		},
+		{
+			name:              "spaces punctuation and slashes become separators",
+			remoteProjectRoot: "Remote Projects/Client Apps/api.v2",
+			want:              "myn-remote-projects-client-apps-api-v2",
+		},
+		{
+			name:              "repeated separators collapse",
+			remoteProjectRoot: "projects///acme -- api",
+			want:              "myn-projects-acme-api",
+		},
+		{
+			name:              "edge separators are trimmed",
+			remoteProjectRoot: "!!!projects/acme???",
+			want:              "myn-projects-acme",
+		},
+		{
+			name:              "empty normalized path uses fallback",
+			remoteProjectRoot: "!!!",
+			want:              "myn-project",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := connectTmuxSessionName(tt.remoteProjectRoot); got != tt.want {
+				t.Fatalf("session name mismatch: want %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestConnectRemoteHandoffQuotesDirectoryFallbackPaths(t *testing.T) {
+	got := connectRemoteHandoffCommand(connectPlan{
+		remotePath:        "Remote Projects/O'Reilly API/src.v2",
+		remoteProjectRoot: "Remote Projects/O'Reilly API",
+	})
+
+	want := strings.Join([]string{
+		"if tmux has-session -t '=myn-remote-projects-o-reilly-api' 2>/dev/null; then",
+		"  exec tmux attach-session -t '=myn-remote-projects-o-reilly-api'",
+		"fi",
+		`start_dir="$HOME"`,
+		`if [ -d "$HOME"/'Remote Projects/O'\''Reilly API/src.v2' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/O'\''Reilly API/src.v2'`,
+		`elif [ -d "$HOME"/'Remote Projects/O'\''Reilly API' ]; then`,
+		`  start_dir="$HOME"/'Remote Projects/O'\''Reilly API'`,
+		"fi",
+		`exec tmux new-session -s 'myn-remote-projects-o-reilly-api' -c "$start_dir"`,
+	}, "\n")
+	if got != want {
+		t.Fatalf("remote handoff mismatch:\nwant %q\ngot  %q", want, got)
+	}
+	if strings.Contains(got, "mkdir") {
+		t.Fatalf("remote handoff must not create missing remote directories: %q", got)
 	}
 }
 
@@ -123,6 +247,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 		setup                 func(t *testing.T, fixture connectTestFixture) string
 		wantRemotePath        string
 		wantRemoteProjectRoot string
+		wantTmuxSessionName   string
 	}{
 		{
 			name:       "configured root maps to remote root",
@@ -134,6 +259,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "projects",
 			wantRemoteProjectRoot: "projects",
+			wantTmuxSessionName:   "myn-projects",
 		},
 		{
 			name:       "subdirectory maps below first segment project",
@@ -147,6 +273,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "projects/acme/api/src",
 			wantRemoteProjectRoot: "projects/acme",
+			wantTmuxSessionName:   "myn-projects-acme",
 		},
 		{
 			name:       "roots and subdirectories with spaces",
@@ -161,6 +288,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "Remote Projects/Client Apps/api",
 			wantRemoteProjectRoot: "Remote Projects/Client Apps",
+			wantTmuxSessionName:   "myn-remote-projects-client-apps",
 		},
 		{
 			name:       "cleaned current directory segments",
@@ -174,6 +302,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "projects/acme/api/src",
 			wantRemoteProjectRoot: "projects/acme",
+			wantTmuxSessionName:   "myn-projects-acme",
 		},
 		{
 			name:       "nested git root does not affect project derivation",
@@ -187,6 +316,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "projects/acme/api",
 			wantRemoteProjectRoot: "projects/acme",
+			wantTmuxSessionName:   "myn-projects-acme",
 		},
 		{
 			name:       "visible symlink-style path is mapped lexically",
@@ -204,6 +334,7 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			},
 			wantRemotePath:        "projects/linked/service",
 			wantRemoteProjectRoot: "projects/linked",
+			wantTmuxSessionName:   "myn-projects-linked",
 		},
 	}
 
@@ -229,6 +360,9 @@ func TestPlanPersonalServerConnectionMapsLocalPathsLexically(t *testing.T) {
 			}
 			if plan.remoteProjectRoot != tt.wantRemoteProjectRoot {
 				t.Fatalf("remote project root mismatch: want %q, got %q", tt.wantRemoteProjectRoot, plan.remoteProjectRoot)
+			}
+			if plan.tmuxSessionName != tt.wantTmuxSessionName {
+				t.Fatalf("tmux session name mismatch: want %q, got %q", tt.wantTmuxSessionName, plan.tmuxSessionName)
 			}
 		})
 	}

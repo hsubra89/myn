@@ -20,3 +20,11 @@
 - Replaced the root-only guard with outside-root validation that reports both the configured local root and current working directory before SSH starts.
 - Added tests for subdirectory handoff, root mapping, spaces, cleaned path segments, nested Git roots, lexical symlink-style paths, and outside-root failure.
 - Verified with `go test ./...` and `go build ./...` from `go/cli`.
+
+2026-05-13 - Issue 4: Reuse and Create Project-Scoped tmux Sessions
+
+- Changed the remote Personal Server Connection handoff to attach an existing exact Project tmux session before any new-session directory fallback runs.
+- Added stable tmux-safe session names derived from the remote Project root, including lowercase normalization and separator collapsing.
+- Added new-session fallback selection for exact mapped remote directory, remote Project root, then the Personal Server User home directory, using only remote `-d` directory checks and no directory creation.
+- Added tests for Project-scoped handoff construction, session-name normalization, shell quoting for paths with spaces and punctuation, and plan-level session names.
+- Verified with `go test ./...`, `go build ./...`, and `git diff --check` from `go/cli`/repo root.

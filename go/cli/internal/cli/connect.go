@@ -39,6 +39,7 @@ type connectPlan struct {
 	sshIdentityPath   string
 	remotePath        string
 	remoteProjectRoot string
+	tmuxSessionName   string
 }
 
 func newConnectCommand(deps connectDeps) *cobra.Command {
@@ -193,6 +194,7 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 		sshIdentityPath:   identityPath,
 		remotePath:        remotePath,
 		remoteProjectRoot: remoteProjectRoot,
+		tmuxSessionName:   connectTmuxSessionName(remoteProjectRoot),
 	}, nil
 }
 
@@ -246,20 +248,69 @@ func connectSSHCommand(plan connectPlan) []string {
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-i", plan.sshIdentityPath,
 		plan.sshUser + "@" + personalServerSSHCommandHost(plan.sshHost),
-		"bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan.remotePath)),
+		"bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan)),
 	}
 }
 
-func connectRemoteHandoffCommand(remoteRoot string) string {
-	return "exec tmux new-session -A -s myn-project -c " + remoteHomePathExpression(remoteRoot)
+func connectRemoteHandoffCommand(plan connectPlan) string {
+	sessionName := plan.tmuxSessionName
+	if sessionName == "" {
+		sessionName = connectTmuxSessionName(plan.remoteProjectRoot)
+	}
+	sessionNameArg := shellQuote(sessionName)
+	sessionTarget := shellQuote("=" + sessionName)
+	remotePath := remoteHomePathExpression(plan.remotePath)
+	remoteProjectRoot := remoteHomePathExpression(plan.remoteProjectRoot)
+
+	lines := []string{
+		"if tmux has-session -t " + sessionTarget + " 2>/dev/null; then",
+		"  exec tmux attach-session -t " + sessionTarget,
+		"fi",
+		`start_dir="$HOME"`,
+		"if [ -d " + remotePath + " ]; then",
+		"  start_dir=" + remotePath,
+	}
+	if remoteProjectRoot != remotePath {
+		lines = append(lines,
+			"elif [ -d "+remoteProjectRoot+" ]; then",
+			"  start_dir="+remoteProjectRoot,
+		)
+	}
+	lines = append(lines,
+		"fi",
+		`exec tmux new-session -s `+sessionNameArg+` -c "$start_dir"`,
+	)
+	return strings.Join(lines, "\n")
+}
+
+func connectTmuxSessionName(remoteProjectRoot string) string {
+	var normalized strings.Builder
+	lastWasSeparator := false
+	for _, r := range strings.ToLower(remoteProjectRoot) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			normalized.WriteRune(r)
+			lastWasSeparator = false
+			continue
+		}
+		if normalized.Len() > 0 && !lastWasSeparator {
+			normalized.WriteByte('-')
+			lastWasSeparator = true
+		}
+	}
+
+	value := strings.Trim(normalized.String(), "-")
+	if value == "" {
+		return "myn-project"
+	}
+	return "myn-" + value
 }
 
 func remoteHomePathExpression(remoteRoot string) string {
 	remoteRoot = path.Clean(remoteRoot)
 	if remoteRoot == "." {
-		return "$HOME"
+		return `"$HOME"`
 	}
-	return "$HOME/" + shellQuote(remoteRoot)
+	return `"$HOME"/` + shellQuote(remoteRoot)
 }
 
 func runConnectProcess(ctx context.Context, req connectProcessRequest) error {

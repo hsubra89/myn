@@ -24,14 +24,14 @@ Source: PRD: Project-Scoped Personal Server Connection
 
 4. **Title**: Reuse and Create Project-Scoped tmux Sessions  
    **Type**: AFK  
-   **Status**: Ready
+   **Status**: Done
    **Blocked by**: Issue 3 (done)
    **User stories covered**: 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 31
 
 5. **Title**: Complete Host Selection and Connection Documentation  
    **Type**: AFK  
-   **Status**: Blocked
-   **Blocked by**: Issue 4
+   **Status**: Ready
+   **Blocked by**: Issue 4 (done)
    **User stories covered**: 21, 23, 24, 32, 33, 34
 
 ## Issue 1: Persist the Personal Server User in Personal Server Configuration
@@ -114,7 +114,7 @@ The target Project is the configured project root itself when the command runs f
 
 ## Issue 4: Reuse and Create Project-Scoped tmux Sessions
 
-**Status**: Ready
+**Status**: Done
 
 ## What to build
 
@@ -126,17 +126,17 @@ When creating a new session, choose the starting directory on the Personal Serve
 
 ## Acceptance criteria
 
-- [ ] Existing target Project tmux sessions are attached as-is.
-- [ ] Missing target Project tmux sessions are created and attached.
-- [ ] tmux session names are derived from the remote Project root path using the agreed normalization.
-- [ ] Session naming tests cover uppercase letters, spaces, punctuation, slashes, repeated separators, edge separators, and empty normalized values.
-- [ ] New sessions start in the exact mapped remote directory when it exists.
-- [ ] New sessions start in the remote Project root when the exact mapped remote directory does not exist but the Project root exists.
-- [ ] New sessions start in the Personal Server User home directory when neither mapped remote directory exists.
-- [ ] Files at mapped remote paths are treated as invalid starting directories.
-- [ ] The remote handoff does not create missing remote project directories.
-- [ ] Existing sessions are attached without applying directory fallback.
-- [ ] Tests cover remote command construction and shell quoting for paths with spaces and punctuation.
+- [x] Existing target Project tmux sessions are attached as-is.
+- [x] Missing target Project tmux sessions are created and attached.
+- [x] tmux session names are derived from the remote Project root path using the agreed normalization.
+- [x] Session naming tests cover uppercase letters, spaces, punctuation, slashes, repeated separators, edge separators, and empty normalized values.
+- [x] New sessions start in the exact mapped remote directory when it exists.
+- [x] New sessions start in the remote Project root when the exact mapped remote directory does not exist but the Project root exists.
+- [x] New sessions start in the Personal Server User home directory when neither mapped remote directory exists.
+- [x] Files at mapped remote paths are treated as invalid starting directories.
+- [x] The remote handoff does not create missing remote project directories.
+- [x] Existing sessions are attached without applying directory fallback.
+- [x] Tests cover remote command construction and shell quoting for paths with spaces and punctuation.
 
 ## Blocked by
 
@@ -144,7 +144,7 @@ When creating a new session, choose the starting directory on the Personal Serve
 
 ## Issue 5: Complete Host Selection and Connection Documentation
 
-**Status**: Blocked
+**Status**: Ready
 
 ## What to build
 
@@ -169,4 +169,4 @@ Update documentation so users can discover `myn connect` and `myn c`, understand
 
 ## Blocked by
 
-- Issue 4: Reuse and Create Project-Scoped tmux Sessions
+- Issue 4: Reuse and Create Project-Scoped tmux Sessions (done)
