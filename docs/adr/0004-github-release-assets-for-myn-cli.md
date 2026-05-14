@@ -1,0 +1,3 @@
+# GitHub Release Assets For Myn CLI
+
+Myn releases distribute CLI binaries through GitHub Release assets rather than GitHub Packages, because the release output is a downloadable executable rather than a package-manager or container registry artifact. A dedicated release workflow builds Linux and macOS archives with embedded version metadata, validates semver release tags, publishes SHA-256 checksums, and creates the GitHub Release immediately after tests pass. The workflow uses plain GitHub Actions shell steps instead of GoReleaser while the release contract remains limited to four binary archives and checksums.

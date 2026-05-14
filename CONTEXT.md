@@ -12,6 +12,10 @@ _Avoid_: generic personal toolbox
 The command name for **Myn**, pronounced "mine".
 _Avoid_: generic command aliases
 
+**Myn Release**:
+A tagged GitHub Release that distributes downloadable **Myn** CLI binaries.
+_Avoid_: GitHub Package, package registry release
+
 **Personal Server**:
 A Hetzner Cloud server that **Myn** provisions for the user's cloud-hosted development environment.
 _Avoid_: remote machine, default server, Myn Server
@@ -108,6 +112,25 @@ _Avoid_: prompt lease, terminal lock
 - Directory fallback affects only newly created **Personal Server Connection** tmux sessions; existing project sessions are attached as-is.
 - `myn connect` fails with clear messaging when run outside the configured local project root.
 - `myn configure` does not modify the user's SSH config for **Personal Server** aliases.
+- A **Myn Release** publishes CLI binaries as GitHub Release assets rather than GitHub Packages.
+- A **Myn Release** is created from an explicit pushed version tag matching `v*`.
+- A **Myn Release** publishes binaries for Linux amd64, Linux arm64, macOS amd64, and macOS arm64.
+- Windows is not a **Myn Release** target until Windows workflows are supported.
+- A **Myn Release** packages each platform binary in a `.tar.gz` archive.
+- A **Myn Release** archive contains only the `myn` executable at the archive root.
+- A **Myn Release** includes a `checksums.txt` asset with SHA-256 sums for all release archives.
+- A **Myn Release** is published automatically after release tests pass for a pushed release tag.
+- A **Myn Release** uses GitHub-generated release notes.
+- A **Myn Release** tag keeps its leading `v`, but the embedded CLI version and release archive names drop the leading `v`.
+- A **Myn Release** with a semver prerelease suffix is marked as a GitHub prerelease.
+- A **Myn Release** validates the pushed tag as semver before publishing.
+- A **Myn Release** publishes only when the tagged commit is reachable from the default branch.
+- A **Myn Release** is built and published by a dedicated release workflow separate from ordinary Go CLI CI.
+- A **Myn Release** workflow uses plain GitHub Actions shell steps rather than GoReleaser.
+- A **Myn Release** workflow uses the built-in `GITHUB_TOKEN` with scoped release permissions.
+- A **Myn Release** workflow fails rather than overwriting an existing release.
+- A **Myn Release** is published immediately after release validation, tests, packaging, and checksum generation pass.
+- **Myn** documents how to install a **Myn Release** binary from the published release assets.
 - All user-visible namespaces use `myn`, including config paths, environment variables, runtime lease directories, cloud resource names, Hetzner labels, bootstrap files, shell profile files, and local development launchers.
 - Documentation uses **Myn** in prose and `myn` for the command name; pronunciation belongs in introductory documentation, not command help.
 - Planning and decision documents keep their technical rationale but use the **Myn** namespace consistently.
@@ -325,3 +348,4 @@ _Avoid_: prompt lease, terminal lock
 - "region" was used to mean **Location** — resolved: the CLI uses **Location** everywhere.
 - "lease" does not mean a permanent lock — resolved: an **Idle Lease** is renewable evidence of recent activity.
 - "same tmux settings" does not mean live dotfile sync — resolved: **Personal Server Bootstrap** installs a repo-owned **Personal Server tmux Profile**.
+- "GitHub package" was used to mean downloadable CLI assets — resolved: use **Myn Release** assets, not GitHub Packages.
