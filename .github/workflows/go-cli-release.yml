@@ -1,0 +1,149 @@
+name: Go CLI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: go-cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go/cli/go.mod
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          semver_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+          if [[ ! "$tag" =~ $semver_re ]]; then
+            echo "Release tags must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease: $tag" >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-list -n 1 "$tag")"
+          short_commit="$(git rev-parse --short "$tag_commit")"
+          version="${tag#v}"
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "tag_commit=$tag_commit"
+            echo "short_commit=$short_commit"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag is on default branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          default_branch="${{ github.event.repository.default_branch }}"
+          git fetch --force origin "${default_branch}:refs/remotes/origin/${default_branch}"
+          if ! git merge-base --is-ancestor "${{ steps.release.outputs.tag_commit }}" "origin/${default_branch}"; then
+            echo "Release tag ${{ steps.release.outputs.tag }} does not point to a commit reachable from ${default_branch}." >&2
+            exit 1
+          fi
+
+      - name: Check release does not already exist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${{ steps.release.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.release.outputs.tag }} already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+      - name: Test
+        working-directory: go/cli
+        run: go test ./...
+
+      - name: Build release archives
+        working-directory: go/cli
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.release.outputs.version }}"
+          commit="${{ steps.release.outputs.short_commit }}"
+          date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-X main.version=${version} -X main.commit=${commit} -X main.date=${date}"
+
+          rm -rf ../../dist
+          mkdir -p ../../dist
+
+          targets=(
+            linux/amd64
+            linux/arm64
+            darwin/amd64
+            darwin/arm64
+          )
+
+          for target in "${targets[@]}"; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            tmpdir="$(mktemp -d)"
+            archive="myn_${version}_${os}_${arch}.tar.gz"
+
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+              -ldflags "$ldflags" \
+              -o "${tmpdir}/myn" \
+              ./cmd/myn
+
+            tar -C "$tmpdir" -czf "../../dist/${archive}" myn
+            rm -rf "$tmpdir"
+          done
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            "${{ steps.release.outputs.tag }}"
+            --generate-notes
+            --title "${{ steps.release.outputs.tag }}"
+          )
+
+          if [[ "${{ steps.release.outputs.prerelease }}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          args+=(dist/*)
+
+          gh release create "${args[@]}"

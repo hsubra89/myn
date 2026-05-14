@@ -6,6 +6,54 @@
 
 Myn ("mine") provisions and operates your personal development environment.
 
+## Install
+
+Download a release archive from
+[`hsubra89/myn` releases](https://github.com/hsubra89/myn/releases). Release
+assets are named `myn_<version>_<os>_<arch>.tar.gz`, where tags keep the
+leading `v` and asset versions omit it:
+
+- `myn_0.1.0_linux_amd64.tar.gz`
+- `myn_0.1.0_linux_arm64.tar.gz`
+- `myn_0.1.0_darwin_amd64.tar.gz`
+- `myn_0.1.0_darwin_arm64.tar.gz`
+
+Linux and macOS install example:
+
+```sh
+VERSION=0.1.0
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  linux|darwin) ;;
+  *) echo "unsupported OS: $OS" >&2; exit 1 ;;
+esac
+
+case "$ARCH" in
+  x86_64) ARCH=amd64 ;;
+  arm64|aarch64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+ARCHIVE="myn_${VERSION}_${OS}_${ARCH}.tar.gz"
+BASE_URL="https://github.com/hsubra89/myn/releases/download/v${VERSION}"
+
+curl -fLO "${BASE_URL}/${ARCHIVE}"
+curl -fLO "${BASE_URL}/checksums.txt"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  grep " ${ARCHIVE}$" checksums.txt | sha256sum -c -
+else
+  grep " ${ARCHIVE}$" checksums.txt | shasum -a 256 -c -
+fi
+
+tar -xzf "$ARCHIVE"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 myn "$HOME/.local/bin/myn"
+myn version
+```
+
 ## Development
 
 Common development commands are defined in [`justfile`](justfile):
