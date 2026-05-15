@@ -49,16 +49,28 @@ UDP-based interactive shell access installed and opened by default for a **Perso
 _Avoid_: optional roaming shell, manual UDP access
 
 **Personal Server Connection**:
-An SSH-backed interactive project-scoped tmux session on the configured **Personal Server**.
+An SSH-backed interactive connection that opens a **Project Session** on the configured **Personal Server**.
 _Avoid_: raw SSH session, Mosh session, remote shell
 
 **myn connect**:
 The canonical command for starting a **Personal Server Connection**, with `myn c` as its short alias.
 _Avoid_: myn ssh, myn tmux, myn shell
 
+**myn connect-new**:
+The canonical command for creating a new **Project Session** for the current **Project**, with `myn cn` as its short alias.
+_Avoid_: myn connect new, myn new
+
+**myn sessions**:
+The canonical command for listing **Project Sessions** for the current **Project**, with `myn s` and `myn l` as short aliases.
+_Avoid_: myn list, tmux ls
+
 **Project**:
 A connection target rooted at the configured project root itself or at a top-level directory directly under it.
 _Avoid_: Git repository, workspace, checkout
+
+**Project Session**:
+A tmux-backed interactive workspace scoped to one **Project** on the **Personal Server**.
+_Avoid_: raw tmux session, shell, terminal
 
 **Personal Server User**:
 A Linux user account created on a **Personal Server** from a normalized form of the current local username.
@@ -89,9 +101,25 @@ _Avoid_: prompt lease, terminal lock
 - A **Personal Server** trusts the configured SSH identity for both root and user login.
 - A **Personal Server** keeps key-based root SSH enabled after bootstrap.
 - A **Personal Server Connection** uses SSH rather than **Mosh Access**.
-- A **Personal Server Connection** attaches the **Personal Server User** to an existing tmux session for the target project when one exists, otherwise it creates a new tmux session for that project.
-- A **Personal Server Connection** names tmux sessions from the remote **Project** root path using a stable `myn-` prefixed tmux-safe name.
-- A **Personal Server Connection** tmux session name lowercases the remote **Project** root path, keeps ASCII letters and digits, converts every other character run to one hyphen, trims edge hyphens, prefixes `myn-`, and uses `myn-project` if the normalized project path is empty.
+- A **Project** can have multiple **Project Sessions**.
+- A **Personal Server Connection** opens a **Project Session** for the target **Project**.
+- A **Project** has a stable default **Project Session** plus optional numbered sibling **Project Sessions**.
+- A default **Project Session** name is derived from the remote **Project** root path using a stable `myn-` prefixed tmux-safe name.
+- A default **Project Session** name lowercases the remote **Project** root path, keeps ASCII letters and digits, converts every other character run to one hyphen, trims edge hyphens, prefixes `myn-`, and uses `myn-project` if the normalized project path is empty.
+- A numbered sibling **Project Session** appends `-2`, `-3`, and so on to the default **Project Session** name.
+- **Project Session** `1` maps to the default **Project Session** name without a `-1` suffix.
+- Bare `myn connect` opens the lowest-numbered existing **Project Session**, creating **Project Session** `1` only when none exist for the target **Project**.
+- `myn connect` accepts an optional **Project Session** number and attaches only to that existing **Project Session**.
+- `myn connect` with a **Project Session** number fails rather than creating a missing **Project Session**.
+- `myn connect-new` creates a new numbered **Project Session** for the target **Project** and opens it.
+- `myn connect-new` uses one greater than the highest existing **Project Session** number.
+- `myn connect-new` creates **Project Session** `1` when the target **Project** has no existing **Project Sessions**.
+- `myn sessions` lists **Project Sessions** for the target **Project**.
+- `myn sessions` sorts **Project Sessions** by session number.
+- `myn sessions` prints one plain row per **Project Session** with the session number and an `attached` marker when tmux reports attached clients.
+- `myn sessions` prints no rows and exits successfully when the target **Project** has no **Project Sessions**.
+- `myn sessions` runs as a non-interactive command without requiring terminal-backed stdin or stdout.
+- `myn sessions` does not attach to or create **Project Sessions**.
 - A **Personal Server Connection** fails rather than falling back to plain SSH when tmux is unavailable.
 - A **Personal Server Connection** relies on the **Personal Server User** login shell PATH to find tmux.
 - A **Personal Server Connection** runs its remote tmux handoff through Bash login-shell command evaluation.
@@ -160,7 +188,7 @@ _Avoid_: prompt lease, terminal lock
 - All user-visible namespaces use `myn`, including config paths, environment variables, runtime lease directories, cloud resource names, Hetzner labels, bootstrap files, shell profile files, and local development launchers.
 - Documentation uses **Myn** in prose and `myn` for the command name; pronunciation belongs in introductory documentation, not command help.
 - Planning and decision documents keep their technical rationale but use the **Myn** namespace consistently.
-- **Myn** uses the command structure `auth hetzner`, `configure`, `connect` (`c`), `idle status`, `run`, and `version`.
+- **Myn** uses the command structure `auth hetzner`, `configure`, `connect` (`c`), `connect-new` (`cn`), `sessions` (`s`, `l`), `idle status`, `run`, and `version`.
 - **Personal Server** prompts run only after local roots and the SSH identity are configured.
 - **Personal Server** creation is skipped unless a valid SSH identity is configured.
 - **Personal Server** provisioning does not clone or sync projects from the local root.
@@ -367,6 +395,12 @@ _Avoid_: prompt lease, terminal lock
 > **Domain expert:** "No — use Hetzner's latest Ubuntu image and apply the latest security updates during bootstrap."
 > **Dev:** "Should an open Codex prompt keep the **Personal Server** awake forever?"
 > **Domain expert:** "No — protect it with a **Stdio Lease**, and let the lease become idle when terminal input and output have both been quiet long enough."
+> **Dev:** "When a **Project** already has multiple **Project Sessions**, should bare `myn connect` open the newest one?"
+> **Domain expert:** "No — open the lowest-numbered existing **Project Session**, and create **Project Session** `1` only when none exist."
+> **Dev:** "Should `myn connect-new` fill gaps in **Project Session** numbers?"
+> **Domain expert:** "No — create one greater than the highest existing **Project Session** number."
+> **Dev:** "Should `myn connect 2` create **Project Session** `2` if it is missing?"
+> **Domain expert:** "No — numbered `myn connect` attaches only to an existing **Project Session**."
 
 ## Flagged ambiguities
 
@@ -376,3 +410,4 @@ _Avoid_: prompt lease, terminal lock
 - "same tmux settings" does not mean live dotfile sync — resolved: **Personal Server Bootstrap** installs a repo-owned **Personal Server tmux Profile**.
 - "GitHub package" was used to mean downloadable CLI assets — resolved: use **Myn Release** assets, not GitHub Packages.
 - "Homebrew-like installer" means **Myn Installer**, not a Homebrew tap or **Personal Server Bootstrap** behavior.
+- "session" now means **Project Session** when discussing `myn connect`, `myn connect-new`, or `myn sessions`.

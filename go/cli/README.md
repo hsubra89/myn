@@ -227,14 +227,20 @@ a Rust toolchain.
 ```sh
 go run ./cmd/myn connect
 go run ./cmd/myn c
+go run ./cmd/myn c 2
+go run ./cmd/myn connect-new
+go run ./cmd/myn cn
+go run ./cmd/myn sessions
+go run ./cmd/myn s
+go run ./cmd/myn l
 ```
 
 `myn connect` starts a Personal Server Connection using the saved Personal
-Server Configuration. It accepts no path arguments; the current working
-directory is the input. The command requires a configured local project root,
-remote project root, SSH identity, Personal Server User, and at least one saved
-Personal Server address. The local project root and SSH identity file must exist
-locally, and stdin and stdout must be terminal-backed.
+Server Configuration. The current working directory is the input. The command
+requires a configured local project root, remote project root, SSH identity,
+Personal Server User, and at least one saved Personal Server address. The local
+project root and SSH identity file must exist locally, and stdin and stdout must
+be terminal-backed.
 
 The current working directory is mapped lexically under the configured local
 project root to the matching path under the configured remote project root. If
@@ -251,12 +257,36 @@ host arguments. The configured SSH identity is passed with `-i`, SSH requests
 one TTY allocation, and host key checking uses
 `StrictHostKeyChecking=accept-new`.
 
-On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. It
-attaches to an existing project-scoped tmux session when one exists; otherwise
-it creates one. New sessions start in the exact mapped remote directory when
-that directory exists, then fall back to the remote Project root, then the
-Personal Server User home directory. Only existing directories are used, and the
-command does not create missing remote project directories.
+On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. Each
+Project can have multiple numbered Project Sessions. Session `1` uses the stable
+project tmux session name, and sessions `2`, `3`, and later append `-2`, `-3`,
+and so on to that name. Bare `myn connect` attaches to the lowest-numbered
+existing Project Session for the current Project. When none exist, it creates
+Project Session `1`. `myn connect N` attaches only to existing Project Session
+`N` and fails rather than creating a missing session.
+
+`myn connect-new` creates a new Project Session for the current Project and
+attaches to it. The new session number is one greater than the highest existing
+Project Session number. When none exist, it creates Project Session `1`.
+
+New Project Sessions start in the exact mapped remote directory when that
+directory exists, then fall back to the remote Project root, then the Personal
+Server User home directory. Only existing directories are used, and the command
+does not create missing remote project directories.
+
+`myn sessions` lists Project Sessions for the current Project. It runs as a
+non-interactive SSH command without requesting a TTY, prints one row per session
+sorted by session number, and adds `attached` when tmux reports attached
+clients:
+
+```text
+1  attached
+2
+3  attached
+```
+
+When the current Project has no Project Sessions, `myn sessions` prints no rows
+and exits successfully.
 
 Mosh Access remains available through the commands printed after successful
 provisioning, but this first `myn connect` implementation does not use Mosh
