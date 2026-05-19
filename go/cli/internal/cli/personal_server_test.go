@@ -1044,19 +1044,19 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Claude Code install failed",
 		"SSH commands:",
-		"- user IPv4: ssh -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
-		"- user IPv6: ssh -i ~/.ssh/id_ed25519 -l harish 2001:db8::55",
+		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
+		"- user IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 2001:db8::55",
 		"Mosh commands:",
-		"- user IPv4: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
-		"- user IPv6: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
+		"- user IPv4: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
+		"- user IPv6: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
 	}
 	for _, forbidden := range []string{
-		"- root IPv4: ssh -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
-		"- root IPv6: ssh -i ~/.ssh/id_ed25519 -l root 2001:db8::55",
+		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- root IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 2001:db8::55",
 	} {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("successful bootstrap should not print root SSH command %q, got %q", forbidden, output)
@@ -1301,7 +1301,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Codex install failed",
 		"SSH commands:",
-		"- root IPv4: ssh -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1387,7 +1387,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 	for _, want := range []string{
 		"Personal Server bootstrap failed: timed out waiting for Personal Server Bootstrap marker",
 		"SSH commands:",
-		"- user IPv4: ssh -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
+		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
