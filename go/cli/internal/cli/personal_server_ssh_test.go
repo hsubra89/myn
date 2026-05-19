@@ -48,6 +48,7 @@ func TestPersonalServerSSHCommandArgsPassLoginAndHostSeparately(t *testing.T) {
 	want := []string{
 		"ssh",
 		"-o", "BatchMode=yes",
+		"-o", "IdentitiesOnly=yes",
 		"-i", "/home/harish/.ssh/id_ed25519",
 		"-l", "harish",
 		"2001:db8::55",
@@ -60,7 +61,7 @@ func TestPersonalServerSSHCommandArgsPassLoginAndHostSeparately(t *testing.T) {
 
 func TestPersonalServerSSHCommandTextPassesLoginAndHostSeparately(t *testing.T) {
 	got := personalServerSSHCommandText("~/.ssh/id_ed25519", "harish", "2001:db8::55")
-	want := "ssh -i ~/.ssh/id_ed25519 -l harish 2001:db8::55"
+	want := "ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 2001:db8::55"
 	if got != want {
 		t.Fatalf("SSH command text mismatch: want %q, got %q", want, got)
 	}

@@ -15,6 +15,7 @@ func personalServerSSHHost(ipv4 string, ipv6 string) string {
 func personalServerSSHCommandArgs(identityFile string, user string, host string, options ...string) []string {
 	args := append([]string{"ssh"}, options...)
 	args = append(args,
+		"-o", "IdentitiesOnly=yes",
 		"-i", identityFile,
 		"-l", strings.TrimSpace(user),
 		strings.TrimSpace(host),
@@ -23,5 +24,5 @@ func personalServerSSHCommandArgs(identityFile string, user string, host string,
 }
 
 func personalServerSSHCommandText(identityFile string, user string, host string) string {
-	return fmt.Sprintf("ssh -i %s -l %s %s", identityFile, strings.TrimSpace(user), strings.TrimSpace(host))
+	return fmt.Sprintf("ssh -o IdentitiesOnly=yes -i %s -l %s %s", identityFile, strings.TrimSpace(user), strings.TrimSpace(host))
 }

@@ -676,6 +676,7 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Install plan:",
 		"System services:",
 		"- security updates and unattended security upgrades",
+		"- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)",
 		"- Mosh Access",
 		"- Docker Engine and Docker Compose",
 		"- Homebrew",
@@ -1043,17 +1044,101 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Claude Code install failed",
 		"SSH commands:",
-		"- user IPv4: ssh -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
-		"- root IPv4: ssh -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
-		"- user IPv6: ssh -i ~/.ssh/id_ed25519 -l harish 2001:db8::55",
-		"- root IPv6: ssh -i ~/.ssh/id_ed25519 -l root 2001:db8::55",
+		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
+		"- user IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 2001:db8::55",
 		"Mosh commands:",
-		"- user IPv4: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
-		"- user IPv6: mosh --ssh=\"ssh -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
+		"- user IPv4: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
+		"- user IPv6: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
+	}
+	for _, forbidden := range []string{
+		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- root IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 2001:db8::55",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("successful bootstrap should not print root SSH command %q, got %q", forbidden, output)
+		}
+	}
+}
+
+func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ssh := &fakePersonalServerSSHRunner{
+		errors: []error{
+			nil,
+			errors.New("root login disabled"),
+			nil,
+		},
+		outputs: []string{
+			"ready\n",
+			`{"status":"success","timestamp":"2026-05-10T12:00:00Z","toolVersions":{"docker":"Docker version 28.1.0"}}`,
+		},
+	}
+
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true},
+		},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return successfulPersonalServerCloudClient()
+			},
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+			runSSH: ssh.Run,
+			currentUsername: func() string {
+				return "harish"
+			},
+		},
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if got, want := ssh.calls, []personalServerSSHCall{
+		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
+		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
+	}
+	if strings.Contains(out.String(), "- root IPv4:") {
+		t.Fatalf("successful hardened bootstrap should not print root SSH commands, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Personal Server bootstrap completed.") {
+		t.Fatalf("expected bootstrap completion output, got %q", out.String())
 	}
 }
 
@@ -1076,6 +1161,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 			errors.New("connection refused"),
 			nil,
 			errors.New("connection reset during reboot"),
+			errors.New("user SSH not ready during reboot"),
 			nil,
 		},
 		outputs: []string{
@@ -1129,6 +1215,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
 		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
 		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
@@ -1214,7 +1301,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Codex install failed",
 		"SSH commands:",
-		"- root IPv4: ssh -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1300,7 +1387,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 	for _, want := range []string{
 		"Personal Server bootstrap failed: timed out waiting for Personal Server Bootstrap marker",
 		"SSH commands:",
-		"- user IPv4: ssh -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
+		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
