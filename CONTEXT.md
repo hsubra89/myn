@@ -106,7 +106,8 @@ _Avoid_: prompt lease, terminal lock
 - A **Project** has a stable default **Project Session** plus optional numbered sibling **Project Sessions**.
 - A default **Project Session** name is derived from the remote **Project** root path using a stable `myn-` prefixed tmux-safe name.
 - A default **Project Session** name lowercases the remote **Project** root path, keeps ASCII letters and digits, converts every other character run to one hyphen, trims edge hyphens, prefixes `myn-`, and uses `myn-project` if the normalized project path is empty.
-- A numbered sibling **Project Session** appends `-2`, `-3`, and so on to the default **Project Session** name.
+- A numbered sibling **Project Session** appends `:2`, `:3`, and so on to the default **Project Session** name.
+- Because tmux normalizes colons in session names to underscores, **Myn** treats the tmux-stored `_2`, `_3`, and so on spelling as the same numbered **Project Session** as `:2`, `:3`, and so on.
 - **Project Session** `1` maps to the default **Project Session** name without a `-1` suffix.
 - Bare `myn connect` opens the lowest-numbered existing **Project Session**, creating **Project Session** `1` only when none exist for the target **Project**.
 - `myn connect` accepts an optional **Project Session** number and attaches only to that existing **Project Session**.
@@ -401,6 +402,8 @@ _Avoid_: prompt lease, terminal lock
 > **Domain expert:** "No — create one greater than the highest existing **Project Session** number."
 > **Dev:** "Should `myn connect 2` create **Project Session** `2` if it is missing?"
 > **Domain expert:** "No — numbered `myn connect` attaches only to an existing **Project Session**."
+> **Dev:** "Should numbered **Project Session** names append `-2`, `-3`, and so on?"
+> **Domain expert:** "No — append `:2`, `:3`, and so on so numbered **Project Sessions** cannot collide with another **Project**'s default **Project Session** name."
 
 ## Flagged ambiguities
 

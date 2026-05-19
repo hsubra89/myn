@@ -259,11 +259,13 @@ one TTY allocation, and host key checking uses
 
 On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. Each
 Project can have multiple numbered Project Sessions. Session `1` uses the stable
-project tmux session name, and sessions `2`, `3`, and later append `-2`, `-3`,
-and so on to that name. Bare `myn connect` attaches to the lowest-numbered
-existing Project Session for the current Project. When none exist, it creates
-Project Session `1`. `myn connect N` attaches only to existing Project Session
-`N` and fails rather than creating a missing session.
+project tmux session name, and sessions `2`, `3`, and later append `:2`, `:3`,
+and so on to that name. Tmux normalizes the colon to `_` in its stored session
+name, so Myn treats that tmux-safe spelling as the same Project Session. Bare
+`myn connect` attaches to the lowest-numbered existing Project Session for the
+current Project. When none exist, it creates Project Session `1`. Numbered
+`myn connect N` attaches only to existing Project Session `N` and fails rather
+than creating a missing session.
 
 `myn connect-new` creates a new Project Session for the current Project and
 attaches to it. The new session number is one greater than the highest existing

@@ -471,6 +471,9 @@ func TestConnectNewCommandAndAliasRouteToSameBehavior(t *testing.T) {
 			if !strings.Contains(remoteCommand, "highest_number") || !strings.Contains(remoteCommand, `exec tmux new-session -s "$new_session"`) {
 				t.Fatalf("connect-new should create the next Project Session, got %#v", runner.requests[0].Command)
 			}
+			if !strings.Contains(remoteCommand, `new_session="${project_session_base}:${new_number}"`) {
+				t.Fatalf("connect-new should use colon-suffixed Project Session names, got %#v", runner.requests[0].Command)
+			}
 		})
 	}
 }
@@ -519,8 +522,19 @@ func TestConnectWithSessionNumberAttachesExistingProjectSessionOnly(t *testing.T
 
 	wantRemoteCommand := strings.Join([]string{
 		connectRemoteRequireTmuxLine(),
-		"if tmux has-session -t '=myn-projects-2' 2>/dev/null; then",
-		"  exec tmux attach-session -t '=myn-projects-2'",
+		connectRemoteProjectSessionNumberFunction(),
+		"project_session_base='myn-projects'",
+		"requested_number=2",
+		`selected_session=""`,
+		`while IFS= read -r session_name; do`,
+		`  [ -n "$session_name" ] || continue`,
+		`  if session_number="$(project_session_number "$project_session_base" "$session_name")" && [ "$session_number" -eq "$requested_number" ]; then`,
+		`    selected_session="$session_name"`,
+		`    break`,
+		`  fi`,
+		`done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)`,
+		`if [ -n "$selected_session" ]; then`,
+		`  exec tmux attach-session -t "=$selected_session"`,
 		"fi",
 		"printf '%s\\n' 'Project Session 2 does not exist; run `myn sessions` to list sessions.' >&2",
 		"exit 1",
@@ -573,12 +587,13 @@ func TestSessionsListsCurrentProjectSessionsByNumber(t *testing.T) {
 	fixture := newConnectTestFixture(t)
 	runner := &fakeConnectProcessRunner{
 		stdout: strings.Join([]string{
-			"myn-projects-10 2",
+			"myn-projects_10 2",
 			"myn-projects 1",
-			"myn-projects-2 0",
+			"myn-projects_2 0",
+			"myn-projects-3 1",
 			"myn-projects-api 1",
 			"unrelated 1",
-			"myn-projects-01 1",
+			"myn-projects_01 1",
 			"",
 		}, "\n"),
 	}
@@ -614,6 +629,32 @@ func TestSessionsPrintsNothingWhenProjectHasNoSessions(t *testing.T) {
 	}
 	if got := out.String(); got != "" {
 		t.Fatalf("sessions should print nothing, got %q", got)
+	}
+}
+
+func TestProjectSessionNumberFromTmuxNameUsesColonNumbering(t *testing.T) {
+	tests := []struct {
+		name       string
+		tmuxName   string
+		wantNumber int
+		wantOK     bool
+	}{
+		{name: "default session is one", tmuxName: "myn-projects", wantNumber: 1, wantOK: true},
+		{name: "logical colon suffix", tmuxName: "myn-projects:2", wantNumber: 2, wantOK: true},
+		{name: "tmux-normalized colon suffix", tmuxName: "myn-projects_2", wantNumber: 2, wantOK: true},
+		{name: "hyphen suffix belongs to another project default", tmuxName: "myn-projects-2", wantOK: false},
+		{name: "leading zero suffix is ignored", tmuxName: "myn-projects_02", wantOK: false},
+		{name: "one suffix is ignored", tmuxName: "myn-projects_1", wantOK: false},
+		{name: "unrelated project default is ignored", tmuxName: "myn-projects-api", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotNumber, gotOK := projectSessionNumberFromTmuxName("myn-projects", tt.tmuxName)
+			if gotNumber != tt.wantNumber || gotOK != tt.wantOK {
+				t.Fatalf("session number mismatch: want (%d, %t), got (%d, %t)", tt.wantNumber, tt.wantOK, gotNumber, gotOK)
+			}
+		})
 	}
 }
 

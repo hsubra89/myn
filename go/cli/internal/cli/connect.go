@@ -401,13 +401,22 @@ func connectRemoteAttachExistingCommand(plan connectPlan, sessionNumber int) str
 	if sessionName == "" {
 		sessionName = connectTmuxSessionName(plan.remoteProjectRoot)
 	}
-	sessionName = projectSessionTmuxSessionName(sessionName, sessionNumber)
-	sessionTarget := shellQuote("=" + sessionName)
 
 	return strings.Join([]string{
 		connectRemoteRequireTmuxLine(),
-		"if tmux has-session -t " + sessionTarget + " 2>/dev/null; then",
-		"  exec tmux attach-session -t " + sessionTarget,
+		connectRemoteProjectSessionNumberFunction(),
+		"project_session_base=" + shellQuote(sessionName),
+		fmt.Sprintf("requested_number=%d", sessionNumber),
+		`selected_session=""`,
+		`while IFS= read -r session_name; do`,
+		`  [ -n "$session_name" ] || continue`,
+		`  if session_number="$(project_session_number "$project_session_base" "$session_name")" && [ "$session_number" -eq "$requested_number" ]; then`,
+		`    selected_session="$session_name"`,
+		`    break`,
+		`  fi`,
+		`done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)`,
+		`if [ -n "$selected_session" ]; then`,
+		`  exec tmux attach-session -t "=$selected_session"`,
 		"fi",
 		"printf '%s\\n' " + shellQuote(fmt.Sprintf("Project Session %d does not exist; run `myn sessions` to list sessions.", sessionNumber)) + " >&2",
 		"exit 1",
@@ -437,7 +446,7 @@ func connectRemoteCreateNewCommand(plan connectPlan) string {
 		`if [ "$new_number" -eq 1 ]; then`,
 		`  new_session="$project_session_base"`,
 		`else`,
-		`  new_session="${project_session_base}-${new_number}"`,
+		`  new_session="${project_session_base}:${new_number}"`,
 		`fi`,
 	}
 	lines = append(lines, connectRemoteStartDirLines(plan)...)
@@ -479,12 +488,14 @@ func connectRemoteProjectSessionNumberFunction() string {
 		`    printf '%s\n' 1`,
 		`    return 0`,
 		`  fi`,
-		`  local prefix="${base}-"`,
-		`  local suffix="${name#"$prefix"}"`,
-		`  if [ "$suffix" != "$name" ] && [[ "$suffix" =~ ^[0-9]+$ ]] && [[ ! "$suffix" == 0* ]] && [ "$suffix" -gt 1 ]; then`,
-		`    printf '%s\n' "$suffix"`,
-		`    return 0`,
-		`  fi`,
+		`  local prefix suffix`,
+		`  for prefix in "${base}:" "${base}_"; do`,
+		`    suffix="${name#"$prefix"}"`,
+		`    if [ "$suffix" != "$name" ] && [[ "$suffix" =~ ^[0-9]+$ ]] && [[ ! "$suffix" == 0* ]] && [ "$suffix" -gt 1 ]; then`,
+		`      printf '%s\n' "$suffix"`,
+		`      return 0`,
+		`    fi`,
+		`  done`,
 		`  return 1`,
 		`}`,
 	}, "\n")
@@ -519,26 +530,22 @@ func connectTmuxSessionName(remoteProjectRoot string) string {
 	return "myn-" + value
 }
 
-func projectSessionTmuxSessionName(defaultSessionName string, number int) string {
-	if number <= 1 {
-		return defaultSessionName
-	}
-	return fmt.Sprintf("%s-%d", defaultSessionName, number)
-}
-
 func projectSessionNumberFromTmuxName(defaultSessionName string, name string) (int, bool) {
 	if name == defaultSessionName {
 		return 1, true
 	}
-	suffix, ok := strings.CutPrefix(name, defaultSessionName+"-")
-	if !ok {
-		return 0, false
+	for _, prefix := range []string{defaultSessionName + ":", defaultSessionName + "_"} {
+		suffix, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		number, err := strconv.Atoi(suffix)
+		if err != nil || number <= 1 || strconv.Itoa(number) != suffix {
+			return 0, false
+		}
+		return number, true
 	}
-	number, err := strconv.Atoi(suffix)
-	if err != nil || number <= 1 || strconv.Itoa(number) != suffix {
-		return 0, false
-	}
-	return number, true
+	return 0, false
 }
 
 func parseProjectSessionNumberArg(commandName string, args []string) (int, bool, error) {
