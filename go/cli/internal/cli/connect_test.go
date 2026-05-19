@@ -65,16 +65,6 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 	if len(runner.requests) != 1 {
 		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 	}
-	wantRemoteCommand := strings.Join([]string{
-		"if tmux has-session -t '=myn-remote-projects' 2>/dev/null; then",
-		"  exec tmux attach-session -t '=myn-remote-projects'",
-		"fi",
-		`start_dir="$HOME"`,
-		`if [ -d "$HOME"/'Remote Projects' ]; then`,
-		`  start_dir="$HOME"/'Remote Projects'`,
-		"fi",
-		`exec tmux new-session -s 'myn-remote-projects' -c "$start_dir"`,
-	}, "\n")
 	wantCommand := []string{
 		"ssh",
 		"-t",
@@ -83,7 +73,11 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 		"-i", identity.PrivatePath,
 		"-l", "harish",
 		"203.0.113.10",
-		"bash", "-lc", shellQuote(wantRemoteCommand),
+		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
+			remotePath:        "Remote Projects",
+			remoteProjectRoot: "Remote Projects",
+			tmuxSessionName:   "myn-remote-projects",
+		})),
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
 		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, got)
@@ -111,18 +105,6 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 		t.Fatalf("connect: %v", err)
 	}
 
-	wantRemoteCommand := strings.Join([]string{
-		"if tmux has-session -t '=myn-remote-projects-acme' 2>/dev/null; then",
-		"  exec tmux attach-session -t '=myn-remote-projects-acme'",
-		"fi",
-		`start_dir="$HOME"`,
-		`if [ -d "$HOME"/'Remote Projects/acme/api/src' ]; then`,
-		`  start_dir="$HOME"/'Remote Projects/acme/api/src'`,
-		`elif [ -d "$HOME"/'Remote Projects/acme' ]; then`,
-		`  start_dir="$HOME"/'Remote Projects/acme'`,
-		"fi",
-		`exec tmux new-session -s 'myn-remote-projects-acme' -c "$start_dir"`,
-	}, "\n")
 	wantCommand := []string{
 		"ssh",
 		"-t",
@@ -131,7 +113,11 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 		"-i", fixture.identity.PrivatePath,
 		"-l", "harish",
 		"203.0.113.10",
-		"bash", "-lc", shellQuote(wantRemoteCommand),
+		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
+			remotePath:        "Remote Projects/acme/api/src",
+			remoteProjectRoot: "Remote Projects/acme",
+			tmuxSessionName:   "myn-remote-projects-acme",
+		})),
 	}
 	if len(runner.requests) != 1 {
 		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
@@ -148,20 +134,9 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 		sshIdentityPath:   "/home/harish/.ssh/id_ed25519",
 		remotePath:        "Remote Projects/acme/api/src",
 		remoteProjectRoot: "Remote Projects/acme",
-	})
+		tmuxSessionName:   "myn-remote-projects-acme",
+	}, connectProjectSessionAuto, 0)
 
-	wantRemoteCommand := strings.Join([]string{
-		"if tmux has-session -t '=myn-remote-projects-acme' 2>/dev/null; then",
-		"  exec tmux attach-session -t '=myn-remote-projects-acme'",
-		"fi",
-		`start_dir="$HOME"`,
-		`if [ -d "$HOME"/'Remote Projects/acme/api/src' ]; then`,
-		`  start_dir="$HOME"/'Remote Projects/acme/api/src'`,
-		`elif [ -d "$HOME"/'Remote Projects/acme' ]; then`,
-		`  start_dir="$HOME"/'Remote Projects/acme'`,
-		"fi",
-		`exec tmux new-session -s 'myn-remote-projects-acme' -c "$start_dir"`,
-	}, "\n")
 	wantCommand := []string{
 		"ssh",
 		"-t",
@@ -170,7 +145,11 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 		"-i", "/home/harish/.ssh/id_ed25519",
 		"-l", "harish",
 		"203.0.113.10",
-		"bash", "-lc", shellQuote(wantRemoteCommand),
+		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
+			remotePath:        "Remote Projects/acme/api/src",
+			remoteProjectRoot: "Remote Projects/acme",
+			tmuxSessionName:   "myn-remote-projects-acme",
+		})),
 	}
 	if !reflect.DeepEqual(command, wantCommand) {
 		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, command)
@@ -225,7 +204,7 @@ func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 			if plan.sshHost != tt.wantPlanHost {
 				t.Fatalf("planned SSH host mismatch: want %q, got %q", tt.wantPlanHost, plan.sshHost)
 			}
-			command := connectSSHCommand(plan)
+			command := connectSSHCommand(plan, connectProjectSessionAuto, 0)
 			assertConnectSSHLogin(t, command, tt.personal.User, tt.wantSSHHost)
 			for _, invalidTarget := range []string{
 				tt.personal.User + "@" + tt.wantSSHHost,
@@ -297,22 +276,17 @@ func TestConnectRemoteHandoffQuotesDirectoryFallbackPaths(t *testing.T) {
 	got := connectRemoteHandoffCommand(connectPlan{
 		remotePath:        "Remote Projects/O'Reilly API/src.v2",
 		remoteProjectRoot: "Remote Projects/O'Reilly API",
-	})
+	}, connectProjectSessionAuto, 0)
 
-	want := strings.Join([]string{
-		"if tmux has-session -t '=myn-remote-projects-o-reilly-api' 2>/dev/null; then",
-		"  exec tmux attach-session -t '=myn-remote-projects-o-reilly-api'",
-		"fi",
-		`start_dir="$HOME"`,
+	for _, want := range []string{
 		`if [ -d "$HOME"/'Remote Projects/O'\''Reilly API/src.v2' ]; then`,
 		`  start_dir="$HOME"/'Remote Projects/O'\''Reilly API/src.v2'`,
 		`elif [ -d "$HOME"/'Remote Projects/O'\''Reilly API' ]; then`,
 		`  start_dir="$HOME"/'Remote Projects/O'\''Reilly API'`,
-		"fi",
-		`exec tmux new-session -s 'myn-remote-projects-o-reilly-api' -c "$start_dir"`,
-	}, "\n")
-	if got != want {
-		t.Fatalf("remote handoff mismatch:\nwant %q\ngot  %q", want, got)
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("remote handoff should contain %q, got %q", want, got)
+		}
 	}
 	if strings.Contains(got, "mkdir") {
 		t.Fatalf("remote handoff must not create missing remote directories: %q", got)
@@ -474,19 +448,216 @@ func TestConnectCommandAndAliasRouteToSameBehavior(t *testing.T) {
 	}
 }
 
-func TestConnectRejectsPathArguments(t *testing.T) {
+func TestConnectNewCommandAndAliasRouteToSameBehavior(t *testing.T) {
+	for _, commandName := range []string{"connect-new", "cn"} {
+		t.Run(commandName, func(t *testing.T) {
+			fixture := newConnectTestFixture(t)
+			runner := &fakeConnectProcessRunner{}
+			cmd := newRootCommand(BuildInfo{}, rootDeps{
+				connect: fixture.deps(runner),
+			})
+			cmd.SetArgs([]string{commandName})
+			cmd.SetIn(strings.NewReader(""))
+
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute %s: %v", commandName, err)
+			}
+			if len(runner.requests) != 1 {
+				t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
+			}
+			remoteCommand := runner.requests[0].Command[len(runner.requests[0].Command)-1]
+			if !strings.Contains(remoteCommand, "highest_number") || !strings.Contains(remoteCommand, `exec tmux new-session -s "$new_session"`) {
+				t.Fatalf("connect-new should create the next Project Session, got %#v", runner.requests[0].Command)
+			}
+			if !strings.Contains(remoteCommand, `new_session="${project_session_base}:${new_number}"`) {
+				t.Fatalf("connect-new should use colon-suffixed Project Session names, got %#v", runner.requests[0].Command)
+			}
+		})
+	}
+}
+
+func TestSessionsCommandAndAliasesRouteToSameBehavior(t *testing.T) {
+	for _, commandName := range []string{"sessions", "s", "l"} {
+		t.Run(commandName, func(t *testing.T) {
+			fixture := newConnectTestFixture(t)
+			runner := &fakeConnectProcessRunner{}
+			cmd := newRootCommand(BuildInfo{}, rootDeps{
+				connect: fixture.deps(runner),
+			})
+			cmd.SetArgs([]string{commandName})
+			cmd.SetIn(strings.NewReader(""))
+
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute %s: %v", commandName, err)
+			}
+			if len(runner.requests) != 1 {
+				t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
+			}
+			command := runner.requests[0].Command
+			if containsString(command, "-t") {
+				t.Fatalf("sessions should not request a TTY, got %#v", command)
+			}
+		})
+	}
+}
+
+func TestConnectWithSessionNumberAttachesExistingProjectSessionOnly(t *testing.T) {
 	fixture := newConnectTestFixture(t)
 	runner := &fakeConnectProcessRunner{}
-	err := runConnectCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, []string{"api"}, fixture.deps(runner))
 
-	if err == nil {
-		t.Fatal("expected path argument error")
+	err := runConnectCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, []string{"2"}, fixture.deps(runner))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
 	}
-	if !strings.Contains(err.Error(), "accepts no path arguments") {
-		t.Fatalf("unexpected error: %v", err)
+	if len(runner.requests) != 1 {
+		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 	}
-	if len(runner.requests) != 0 {
-		t.Fatalf("process should not start after path argument error, got %d calls", len(runner.requests))
+
+	wantRemoteCommand := strings.Join([]string{
+		connectRemoteRequireTmuxLine(),
+		connectRemoteProjectSessionNumberFunction(),
+		"project_session_base='myn-projects'",
+		"requested_number=2",
+		`selected_session=""`,
+		`while IFS= read -r session_name; do`,
+		`  [ -n "$session_name" ] || continue`,
+		`  if session_number="$(project_session_number "$project_session_base" "$session_name")" && [ "$session_number" -eq "$requested_number" ]; then`,
+		`    selected_session="$session_name"`,
+		`    break`,
+		`  fi`,
+		`done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)`,
+		`if [ -n "$selected_session" ]; then`,
+		`  exec tmux attach-session -t "=$selected_session"`,
+		"fi",
+		"printf '%s\\n' 'Project Session 2 does not exist; run `myn sessions` to list sessions.' >&2",
+		"exit 1",
+	}, "\n")
+	wantCommand := []string{
+		"ssh",
+		"-t",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-i", fixture.identity.PrivatePath,
+		"-l", "harish",
+		"203.0.113.10",
+		"bash", "-lc", shellQuote(wantRemoteCommand),
+	}
+	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
+		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, got)
+	}
+}
+
+func TestConnectRejectsInvalidSessionArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "non-number", args: []string{"api"}, want: "positive integer"},
+		{name: "zero", args: []string{"0"}, want: "positive integer"},
+		{name: "too many", args: []string{"1", "2"}, want: "at most one Project Session number"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newConnectTestFixture(t)
+			runner := &fakeConnectProcessRunner{}
+			err := runConnectCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, tt.args, fixture.deps(runner))
+
+			if err == nil {
+				t.Fatal("expected invalid session argument error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("unexpected error: want %q in %q", tt.want, err.Error())
+			}
+			if len(runner.requests) != 0 {
+				t.Fatalf("process should not start after argument error, got %d calls", len(runner.requests))
+			}
+		})
+	}
+}
+
+func TestSessionsListsCurrentProjectSessionsByNumber(t *testing.T) {
+	fixture := newConnectTestFixture(t)
+	runner := &fakeConnectProcessRunner{
+		stdout: strings.Join([]string{
+			"myn-projects_10 2",
+			"myn-projects 1",
+			"myn-projects_2 0",
+			"myn-projects-3 1",
+			"myn-projects-api 1",
+			"unrelated 1",
+			"myn-projects_01 1",
+			"",
+		}, "\n"),
+	}
+
+	var out bytes.Buffer
+	err := runSessionsCommand(strings.NewReader("not-a-terminal"), &out, &bytes.Buffer{}, nil, fixture.deps(runner))
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+
+	const want = "1  attached\n2\n10  attached\n"
+	if got := out.String(); got != want {
+		t.Fatalf("sessions output mismatch:\nwant %q\ngot  %q", want, got)
+	}
+	if len(runner.requests) != 1 {
+		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
+	}
+	if containsString(runner.requests[0].Command, "-t") {
+		t.Fatalf("sessions should not request a TTY, got %#v", runner.requests[0].Command)
+	}
+}
+
+func TestSessionsPrintsNothingWhenProjectHasNoSessions(t *testing.T) {
+	fixture := newConnectTestFixture(t)
+	runner := &fakeConnectProcessRunner{
+		stdout: "unrelated 1\nmyn-projects-api 1\n",
+	}
+
+	var out bytes.Buffer
+	err := runSessionsCommand(strings.NewReader(""), &out, &bytes.Buffer{}, nil, fixture.deps(runner))
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if got := out.String(); got != "" {
+		t.Fatalf("sessions should print nothing, got %q", got)
+	}
+}
+
+func TestProjectSessionNumberFromTmuxNameUsesColonNumbering(t *testing.T) {
+	tests := []struct {
+		name       string
+		tmuxName   string
+		wantNumber int
+		wantOK     bool
+	}{
+		{name: "default session is one", tmuxName: "myn-projects", wantNumber: 1, wantOK: true},
+		{name: "logical colon suffix", tmuxName: "myn-projects:2", wantNumber: 2, wantOK: true},
+		{name: "tmux-normalized colon suffix", tmuxName: "myn-projects_2", wantNumber: 2, wantOK: true},
+		{name: "hyphen suffix belongs to another project default", tmuxName: "myn-projects-2", wantOK: false},
+		{name: "leading zero suffix is ignored", tmuxName: "myn-projects_02", wantOK: false},
+		{name: "one suffix is ignored", tmuxName: "myn-projects_1", wantOK: false},
+		{name: "unrelated project default is ignored", tmuxName: "myn-projects-api", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotNumber, gotOK := projectSessionNumberFromTmuxName("myn-projects", tt.tmuxName)
+			if gotNumber != tt.wantNumber || gotOK != tt.wantOK {
+				t.Fatalf("session number mismatch: want (%d, %t), got (%d, %t)", tt.wantNumber, tt.wantOK, gotNumber, gotOK)
+			}
+		})
 	}
 }
 
@@ -774,11 +945,17 @@ func (fixture connectTestFixture) deps(runner *fakeConnectProcessRunner) connect
 
 type fakeConnectProcessRunner struct {
 	requests []connectProcessRequest
+	stdout   string
 	err      error
 }
 
 func (r *fakeConnectProcessRunner) Run(_ context.Context, req connectProcessRequest) error {
 	req.Command = append([]string(nil), req.Command...)
 	r.requests = append(r.requests, req)
+	if req.Stdout != nil && r.stdout != "" {
+		if _, err := io.WriteString(req.Stdout, r.stdout); err != nil {
+			return err
+		}
+	}
 	return r.err
 }
