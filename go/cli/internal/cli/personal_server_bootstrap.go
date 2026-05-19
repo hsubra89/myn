@@ -9,7 +9,10 @@ import (
 	"go.yaml.in/yaml/v2"
 )
 
-const personalServerBootstrapScriptPath = "/usr/local/sbin/myn-personal-server-bootstrap.sh"
+const (
+	personalServerBootstrapScriptPath     = "/usr/local/sbin/myn-personal-server-bootstrap.sh"
+	personalServerSSHHardeningProfilePath = "/etc/ssh/sshd_config.d/20-myn-hardening.conf"
+)
 
 //go:embed personal_server_tmux.conf
 var personalServerTmuxProfile string
@@ -170,6 +173,7 @@ func renderPersonalServerBootstrapScript(input personalServerBootstrapInput) str
 	fmt.Fprintf(&b, "MYN_REMOTE_PROJECT_ROOT=%s\n", shellQuote(remoteRootPath))
 	fmt.Fprintln(&b, "MYN_MARKER_DIR='/var/lib/myn'")
 	fmt.Fprintln(&b, "MYN_MARKER=\"$MYN_MARKER_DIR/personal-server-bootstrap.json\"")
+	fmt.Fprintf(&b, "MYN_SSH_HARDENING_PROFILE=%s\n", shellQuote(personalServerSSHHardeningProfilePath))
 	fmt.Fprintln(&b, "MYN_REBOOT_REQUIRED='false'")
 	fmt.Fprintf(&b, "MYN_HOMEBREW_TOOLS=(%s)\n", shellArray(input.ToolPlan.HomebrewTools))
 	fmt.Fprintf(&b, "MYN_SKIPPED_GIT_IDENTITY=(%s)\n", shellArray(skippedGitIdentity))
@@ -249,7 +253,17 @@ payload = {
 with open(path, "w", encoding="utf-8") as marker:
     json.dump(payload, marker, indent=2, sort_keys=True)
     marker.write("\n")
+os.chmod(path, 0o644)
 PY
+}
+
+fail_ssh_hardening() {
+  local reason="$1"
+  local failure="Personal Server SSH Hardening Profile failed to apply: $reason"
+  echo "$failure" >&2
+  rm -f "$MYN_SSH_HARDENING_PROFILE" 2>/dev/null || true
+  write_marker "failed" "$failure"
+  exit 1
 }
 
 mark_failed() {
@@ -342,12 +356,71 @@ fi`)
 		}
 	}
 
-	fmt.Fprintln(b, `
+	fmt.Fprint(b, `
 if [ -f /var/run/reboot-required ]; then
   MYN_REBOOT_REQUIRED='true'
 fi
 
+if ! install -d -m 0755 /etc/ssh/sshd_config.d; then
+  fail_ssh_hardening "could not create sshd_config.d"
+fi
+if ! cat >"$MYN_SSH_HARDENING_PROFILE" <<'SSHDHARDENING'
+`)
+	fmt.Fprint(b, renderPersonalServerSSHHardeningProfile(input.User))
+	fmt.Fprintln(b, `SSHDHARDENING
+then
+  fail_ssh_hardening "could not write $MYN_SSH_HARDENING_PROFILE"
+fi
+if ! chmod 0644 "$MYN_SSH_HARDENING_PROFILE"; then
+  fail_ssh_hardening "could not secure $MYN_SSH_HARDENING_PROFILE"
+fi
+if ! sshd -t; then
+  fail_ssh_hardening "sshd configuration validation failed"
+fi
+if ! systemctl reload ssh; then
+  if ! systemctl reload sshd; then
+    fail_ssh_hardening "SSH service reload failed"
+  fi
+fi
+
 write_marker "success" ""`)
+}
+
+func renderPersonalServerSSHHardeningProfile(user string) string {
+	return fmt.Sprintf(`# Hardened SSH daemon settings for Myn Personal Servers.
+# Installed by Personal Server Bootstrap after key-only user login works.
+
+PermitRootLogin no
+AllowUsers %s
+
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+
+StrictModes yes
+HostbasedAuthentication no
+IgnoreRhosts yes
+
+LoginGraceTime 30
+MaxAuthTries 3
+MaxStartups 10:30:60
+PerSourceMaxStartups 5
+
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding local
+GatewayPorts no
+PermitTunnel no
+PermitUserEnvironment no
+
+LogLevel VERBOSE
+DebianBanner no
+
+ClientAliveInterval 300
+ClientAliveCountMax 2
+`, user)
 }
 
 func skippedPersonalServerGitIdentity(identity personalServerGitIdentity) []string {

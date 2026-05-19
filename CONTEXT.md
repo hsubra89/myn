@@ -44,6 +44,10 @@ _Avoid_: SSH-only firewall, generated firewall
 A Hetzner Cloud SSH key resource created from the configured local SSH identity for **Personal Server** access.
 _Avoid_: remote key, uploaded key
 
+**Personal Server SSH Hardening Profile**:
+A server-side OpenSSH daemon drop-in that restricts SSH access on a **Personal Server** after bootstrap.
+_Avoid_: default ssh config, SSH client config
+
 **Mosh Access**:
 UDP-based interactive shell access installed and opened by default for a **Personal Server**.
 _Avoid_: optional roaming shell, manual UDP access
@@ -86,8 +90,16 @@ _Avoid_: prompt lease, terminal lock
 
 ## Relationships
 
-- A **Personal Server** trusts the configured SSH identity for both root and user login.
-- A **Personal Server** keeps key-based root SSH enabled after bootstrap.
+- A **Personal Server** trusts the configured SSH identity for bootstrap-time root login and ongoing **Personal Server User** login.
+- A **Personal Server** disables root SSH after the **Personal Server Bootstrap** completes.
+- A **Personal Server SSH Hardening Profile** is installed during **Personal Server Bootstrap** and allows SSH login only for the **Personal Server User**.
+- The **Personal Server SSH Hardening Profile** is installed at `/etc/ssh/sshd_config.d/20-myn-hardening.conf`.
+- The **Personal Server SSH Hardening Profile** is applied only to newly provisioned **Personal Servers**.
+- A **Personal Server SSH Hardening Profile** names exactly the **Personal Server User** in `AllowUsers`.
+- A **Personal Server SSH Hardening Profile** disables SSH agent forwarding by default.
+- A **Personal Server SSH Hardening Profile** allows only local TCP forwarding by default.
+- A **Personal Server SSH Hardening Profile** requires public-key SSH authentication and disables password-style SSH authentication.
+- A **Personal Server SSH Hardening Profile** uses conservative OpenSSH daemon defaults for login grace time, authentication retries, unauthenticated connection limits, X11 forwarding, host-based trust, tunnels, user-controlled environment, banners, logging, and idle client detection.
 - A **Personal Server Connection** uses SSH rather than **Mosh Access**.
 - A **Personal Server Connection** attaches the **Personal Server User** to an existing tmux session for the target project when one exists, otherwise it creates a new tmux session for that project.
 - A **Personal Server Connection** names tmux sessions from the remote **Project** root path using a stable `myn-` prefixed tmux-safe name.
@@ -194,9 +206,11 @@ _Avoid_: prompt lease, terminal lock
 - Missing **Hetzner Credentials** do not block saving local configuration; they only skip **Personal Server** creation.
 - Interactive `configure` asks for explicit final confirmation before creating a **Personal Server**.
 - A created **Personal Server** is saved in **Personal Server Configuration** even if the **Personal Server Bootstrap** fails or times out.
-- `myn configure` reports user and root SSH commands with `-i` for the configured SSH identity and `-l` for the login user for both IPv4 and IPv6 after **Personal Server** creation, with IPv4 first.
+- `myn configure` reports SSH commands with `-i` for the configured SSH identity and `-l` for the login user, with IPv4 first.
 - `myn configure` reports **Mosh Access** commands for the **Personal Server User** after **Personal Server** creation, with IPv4 first and the configured SSH identity passed explicitly.
 - `myn configure` reports **Mosh Access** commands only after successful **Personal Server Bootstrap**.
+- After successful **Personal Server Bootstrap**, `myn configure` reports only **Personal Server User** access commands, not root SSH commands.
+- If **Personal Server Bootstrap** fails or times out before SSH hardening takes effect, `myn configure` reports root SSH commands as a recovery path.
 - `myn configure` saves local roots and SSH identity before attempting **Personal Server** creation, then saves **Personal Server Configuration** after server creation succeeds.
 - After **Personal Server Bootstrap** completes, `myn configure` reports installed tool versions from the completion marker.
 - **Personal Server** provisioning is implemented separately from local root and SSH identity configuration.
@@ -225,12 +239,17 @@ _Avoid_: prompt lease, terminal lock
 - **Personal Server Bootstrap** installs `mosh` as an apt-managed system package for **Mosh Access**.
 - A **Personal Server Bootstrap** installs Docker Engine and the compose plugin from Docker's official apt repository.
 - **Personal Server** creation is not considered complete until the **Personal Server Bootstrap** finishes.
-- The **Personal Server Bootstrap** writes a completion marker with status, timestamp, reboot information, and installed tool versions that **Myn** polls for over root SSH.
+- The **Personal Server Bootstrap** writes a completion marker with status, timestamp, reboot information, and installed tool versions that **Myn** polls for over SSH.
+- `myn configure` reads the **Personal Server Bootstrap** completion marker over root SSH first and can fall back to **Personal Server User** SSH after hardening disables root SSH.
+- The **Personal Server SSH Hardening Profile** is validated and applied before the **Personal Server Bootstrap** writes a successful completion marker.
+- The **Personal Server Bootstrap** validates the composed OpenSSH daemon configuration before reloading SSH for the **Personal Server SSH Hardening Profile**.
+- The **Personal Server Bootstrap** completion marker is readable by the **Personal Server User** so `myn configure` can observe success after root SSH is disabled.
 - The **Personal Server Bootstrap** completion marker reports the installed `mosh` version.
 - The **Personal Server Bootstrap** must finish within five minutes after the **Personal Server** first accepts root SSH.
 - Automatic reboot downtime counts against the five-minute **Personal Server Bootstrap** timeout.
 - The **Personal Server Bootstrap** install plan is shown before final creation confirmation.
 - The **Personal Server Bootstrap** install plan groups system services, Homebrew tools, and coding agents separately.
+- The **Personal Server Bootstrap** install plan mentions the **Personal Server SSH Hardening Profile** because it changes the access model after bootstrap.
 - Homebrew and Homebrew-installed tools belong to the **Personal Server User**, not root.
 - **Personal Server Bootstrap** does not copy local dotfiles or shell configuration beyond required Homebrew, nvm, Git identity setup, and the repo-owned **Personal Server tmux Profile**.
 - **Personal Server Bootstrap** installs the **Personal Server tmux Profile** for the **Personal Server User** instead of reading the user's local `~/.tmux.conf` at provisioning time.
@@ -252,6 +271,8 @@ _Avoid_: prompt lease, terminal lock
 - **Personal Server Bootstrap** hard-fails system update/security setup, user creation, SSH authorization, remote project root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup.
 - **Personal Server Bootstrap** hard-fails writing the **Personal Server tmux Profile**.
 - **Personal Server Bootstrap** hard-fails `mosh` installation because **Mosh Access** is default Personal Server access.
+- **Personal Server Bootstrap** hard-fails applying the **Personal Server SSH Hardening Profile** because hardened SSH is part of the Personal Server security contract.
+- A **Personal Server SSH Hardening Profile** failure is reported clearly before `myn configure` shows root SSH recovery commands.
 - A **Stdio Lease** is active only while the wrapped command still exists and terminal input or output is recent.
 - A quiet **Stdio Lease** can become idle while the wrapped command is still waiting at a prompt.
 - A completed **Stdio Lease** is removed on normal wrapper exit.
@@ -302,7 +323,7 @@ _Avoid_: prompt lease, terminal lock
 > **Dev:** "Can we rely only on cloud-init for SSH access?"
 > **Domain expert:** "No — create or reuse a **Personal Server SSH Key** for root login and also authorize the key for the user account."
 > **Dev:** "Should root SSH be disabled after bootstrap?"
-> **Domain expert:** "No — the configured SSH identity should continue to work for both root and the **Personal Server User**."
+> **Domain expert:** "Yes — root SSH is only a bootstrap-time control channel; after bootstrap, only the **Personal Server User** should be reachable over SSH."
 > **Dev:** "Does 'same name as the local user' mean verbatim?"
 > **Domain expert:** "No — create a **Personal Server User** from a Linux-safe normalized local username."
 > **Dev:** "Which login shell should the **Personal Server User** start with?"
@@ -328,7 +349,13 @@ _Avoid_: prompt lease, terminal lock
 > **Dev:** "Can `configure` return once Hetzner accepts the create request?"
 > **Domain expert:** "No — block and poll until the **Personal Server Bootstrap** completes or times out."
 > **Dev:** "How should **Myn** know the **Personal Server Bootstrap** is done?"
-> **Domain expert:** "Poll over root SSH for the bootstrap completion marker written by cloud-init."
+> **Domain expert:** "Poll over SSH for the bootstrap completion marker written by cloud-init."
+> **Dev:** "Should SSH hardening switch bootstrap polling away from root SSH?"
+> **Domain expert:** "Use root SSH first, but allow reading the marker as the **Personal Server User** after the **Personal Server SSH Hardening Profile** disables root SSH."
+> **Dev:** "What if SSH hardening disables root SSH before `myn configure` reads the success marker?"
+> **Domain expert:** "`myn configure` may read the bootstrap marker as the **Personal Server User** after root SSH is closed."
+> **Dev:** "Should bootstrap reload SSH immediately after writing the hardening profile?"
+> **Domain expert:** "No — validate the composed OpenSSH daemon configuration first and fail clearly if the hardening profile cannot be applied."
 > **Dev:** "How long should **Myn** wait for bootstrap?"
 > **Domain expert:** "At most five minutes after the **Personal Server** first accepts root SSH."
 > **Dev:** "When should users see the software list?"
@@ -351,6 +378,8 @@ _Avoid_: prompt lease, terminal lock
 > **Domain expert:** "No — it does not need to mention the specific tmux configuration."
 > **Dev:** "Should failing to write the **Personal Server tmux Profile** be treated as a partial setup issue?"
 > **Domain expert:** "No — bootstrap should hard-fail because the expected development environment was not created."
+> **Dev:** "Should failing to apply SSH hardening be treated as a partial setup issue?"
+> **Domain expert:** "No — bootstrap should hard-fail, report the hardening failure clearly, and leave root SSH available for recovery."
 > **Dev:** "After seeding the snapshot, should tests keep comparing it to the user's live local `~/.tmux.conf`?"
 > **Domain expert:** "No — the repo-owned snapshot is canonical."
 > **Dev:** "Should bootstrap install a Rust stable toolchain?"

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -72,6 +73,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	for _, want := range []string{
 		"MYN_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
 		"export MYN_USER='harish'",
+		"MYN_SSH_HARDENING_PROFILE='/etc/ssh/sshd_config.d/20-myn-hardening.conf'",
 		"install -d -o \"$MYN_USER\" -g \"$MYN_USER\" \"$MYN_REMOTE_PROJECT_ROOT\"",
 		"install -m 0644 -o \"$MYN_USER\" -g \"$MYN_USER\" /dev/null \"/home/$MYN_USER/.tmux.conf\"",
 		"cat >\"/home/$MYN_USER/.tmux.conf\" <<'TMUXCONF'\n" + personalServerTmuxProfile + "TMUXCONF\n",
@@ -91,6 +93,19 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"MYN_SKIPPED_GIT_IDENTITY=( 'user.email' )",
 		"trap mark_failed ERR",
 		"write_marker \"failed\"",
+		"os.chmod(path, 0o644)",
+		"Personal Server SSH Hardening Profile failed to apply",
+		"PermitRootLogin no",
+		"AllowUsers harish",
+		"AuthenticationMethods publickey",
+		"PasswordAuthentication no",
+		"KbdInteractiveAuthentication no",
+		"AllowAgentForwarding no",
+		"AllowTcpForwarding local",
+		"PermitTunnel no",
+		"ClientAliveInterval 300",
+		"sshd -t",
+		"systemctl reload ssh",
 		"MYN_PARTIAL_FAILURES+=(\"Codex install failed\")",
 		"MYN_PARTIAL_FAILURES+=(\"Claude Code install failed\")",
 		"\"status\"",
@@ -116,9 +131,61 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"gh auth login",
 		"brew install mosh",
 		"$6$abcdefghijklmnop$hashed",
+		"AllowUsers root",
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("bootstrap script should not contain %q:\n%s", forbidden, script)
+		}
+	}
+}
+
+func TestRenderPersonalServerBootstrapScriptIsValidBash(t *testing.T) {
+	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
+		User:              "harish",
+		PasswordHash:      "$6$abcdefghijklmnop$hashed",
+		SSHPublicKey:      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey personal@local",
+		RemoteProjectRoot: "projects",
+		ToolPlan:          defaultPersonalServerBootstrapToolPlan(),
+	})
+
+	cmd := exec.Command("bash", "-n")
+	cmd.Stdin = strings.NewReader(script)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bootstrap script should be valid bash: %v\n%s", err, output)
+	}
+}
+
+func TestRenderPersonalServerSSHHardeningProfile(t *testing.T) {
+	profile := renderPersonalServerSSHHardeningProfile("harish")
+	for _, want := range []string{
+		"PermitRootLogin no",
+		"AllowUsers harish",
+		"PubkeyAuthentication yes",
+		"AuthenticationMethods publickey",
+		"PasswordAuthentication no",
+		"KbdInteractiveAuthentication no",
+		"PermitEmptyPasswords no",
+		"StrictModes yes",
+		"HostbasedAuthentication no",
+		"IgnoreRhosts yes",
+		"LoginGraceTime 30",
+		"MaxAuthTries 3",
+		"MaxStartups 10:30:60",
+		"PerSourceMaxStartups 5",
+		"X11Forwarding no",
+		"AllowAgentForwarding no",
+		"AllowTcpForwarding local",
+		"GatewayPorts no",
+		"PermitTunnel no",
+		"PermitUserEnvironment no",
+		"LogLevel VERBOSE",
+		"DebianBanner no",
+		"ClientAliveInterval 300",
+		"ClientAliveCountMax 2",
+	} {
+		if !strings.Contains(profile, want) {
+			t.Fatalf("hardening profile should contain %q:\n%s", want, profile)
 		}
 	}
 }

@@ -480,7 +480,7 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	fmt.Fprintf(out, "Personal Server created: server %d.\n", server.ID)
 	fmt.Fprintf(out, "Personal Server addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
 
-	marker, err := gate.waitForPersonalServerBootstrap(ctx, identity, server)
+	marker, err := gate.waitForPersonalServerBootstrap(ctx, identity, plan.User, server)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
 		writePersonalServerSSHCommands(out, plan, server)
@@ -520,7 +520,7 @@ type personalServerBootstrapMarker struct {
 	SkippedGitIdentity []string          `json:"skippedGitIdentity"`
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, identity sshIdentityCandidate, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
+func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, identity sshIdentityCandidate, user string, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
 	host := personalServerBootstrapHost(server)
 	if host == "" {
 		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no reachable public address")
@@ -536,11 +536,19 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 	defer cancel()
 
 	for {
-		output, err := runner(pollCtx, identity.IdentityPath, "root", host, "cat "+personalServerBootstrapMarkerPath)
-		if err == nil {
-			marker, parseErr := parsePersonalServerBootstrapMarker(output)
-			if parseErr == nil {
-				return marker, nil
+		for _, loginUser := range personalServerBootstrapMarkerUsers(user) {
+			output, err := runner(pollCtx, identity.IdentityPath, loginUser, host, "cat "+personalServerBootstrapMarkerPath)
+			if err == nil {
+				marker, parseErr := parsePersonalServerBootstrapMarker(output)
+				if parseErr == nil {
+					return marker, nil
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return personalServerBootstrapMarker{}, err
+			}
+			if pollCtx.Err() != nil {
+				return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 			}
 		}
 
@@ -557,6 +565,14 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
 	}
+}
+
+func personalServerBootstrapMarkerUsers(user string) []string {
+	user = strings.TrimSpace(user)
+	if user == "" || user == "root" {
+		return []string{"root"}
+	}
+	return []string{"root", user}
 }
 
 func (gate personalServerProvisioningGate) waitForPersonalServerRootSSH(ctx context.Context, runner personalServerSSHRunner, identityFile string, host string) error {
@@ -594,7 +610,7 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 		fmt.Fprintf(out, "Reboot required: %t\n", marker.RebootRequired)
 		writePersonalServerToolVersions(out, marker.ToolVersions)
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerUserSSHCommands(out, plan, server)
 		writePersonalServerMoshCommands(out, plan, server)
 		return nil
 	case "failed":
@@ -652,6 +668,12 @@ func writePersonalServerSSHCommands(out io.Writer, plan personalServerCreationPl
 	writePersonalServerSSHCommand(out, "root IPv4", plan.SSHIdentityFile, "root", server.IPv4)
 	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
 	writePersonalServerSSHCommand(out, "root IPv6", plan.SSHIdentityFile, "root", server.IPv6)
+}
+
+func writePersonalServerUserSSHCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
+	fmt.Fprintln(out, "SSH commands:")
+	writePersonalServerSSHCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
+	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
 }
 
 func writePersonalServerSSHCommand(out io.Writer, label string, identityFile string, user string, host string) {
@@ -1218,6 +1240,7 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintln(out, "Install plan:")
 	fmt.Fprintln(out, "System services:")
 	fmt.Fprintln(out, "- security updates and unattended security upgrades")
+	fmt.Fprintln(out, "- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)")
 	fmt.Fprintln(out, "- Mosh Access")
 	fmt.Fprintln(out, "- Docker Engine and Docker Compose")
 	fmt.Fprintln(out, "- Personal Server User in docker group (root-equivalent access)")
