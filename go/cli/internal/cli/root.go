@@ -31,9 +31,11 @@ func newRootCommand(info BuildInfo, deps rootDeps) *cobra.Command {
 
 	cmd.AddCommand(newAuthCommand())
 	cmd.AddCommand(newConnectCommand(deps.connect))
+	cmd.AddCommand(newConnectNewCommand(deps.connect))
 	cmd.AddCommand(newConfigureCommand())
 	cmd.AddCommand(newIdleCommand())
 	cmd.AddCommand(newRunCommand())
+	cmd.AddCommand(newSessionsCommand(deps.connect))
 	cmd.AddCommand(newVersionCommand(info))
 
 	return cmd
