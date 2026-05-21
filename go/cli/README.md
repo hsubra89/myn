@@ -6,6 +6,29 @@
 
 Myn ("mine") provisions and operates your personal development environment.
 
+## Hetzner Personal Server Setup
+
+These commands install `myn`, save Hetzner Cloud credentials, configure local
+project settings and SSH access, create a Hetzner Personal Server through the
+interactive provisioning flow, and then connect to it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hsubra89/myn/master/go/cli/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+myn version
+
+mkdir -p "$HOME/projects"
+myn auth hetzner
+myn configure
+
+cd "$HOME/projects"
+myn connect
+```
+
+`myn auth hetzner` and `myn configure` are interactive. Authentication prompts
+for Hetzner Cloud credentials, and configuration prompts for local project
+settings, SSH access, and the Personal Server creation choices.
+
 ## Install
 
 ```sh
@@ -35,7 +58,7 @@ just tidy
 ## Run
 
 ```sh
-go run ./cmd/myn version
+myn version
 ```
 
 ## Local Dev Launcher
@@ -54,7 +77,7 @@ it.
 ## Configure
 
 ```sh
-go run ./cmd/myn configure
+myn configure
 ```
 
 The command configures project roots for this machine and the remote machine,
@@ -98,7 +121,7 @@ config saving.
 Non-interactive options:
 
 ```sh
-go run ./cmd/myn configure \
+myn configure \
   --local-root projects \
   --remote-root projects \
   --ssh-identity-file ~/.ssh/id_ed25519
@@ -108,10 +131,33 @@ Non-interactive configuration accepts an existing `ssh.identityFile` from the
 config or a `--ssh-identity-file` value. It does not generate SSH keys.
 Non-interactive `configure` also never creates a Personal Server.
 
+## Project Roots
+
+`myn` uses the local project root and remote project root to map the directory
+you are in locally to the matching directory on the Personal Server.
+
+The local root is an existing directory under your home directory that contains
+your projects, such as `~/projects`. The remote root is a path relative to the
+Personal Server user's home directory, also commonly `projects`.
+
+For example, with both roots configured as `projects`:
+
+```text
+Local:  ~/projects/cool-vibe-coded-project/app
+Remote: ~/projects/cool-vibe-coded-project/app
+```
+
+When you run `myn connect` from inside
+`~/projects/cool-vibe-coded-project/app`, it connects to the Personal Server
+and starts or attaches to the Project Session for `cool-vibe-coded-project`,
+using `~/projects/cool-vibe-coded-project/app` as the preferred remote working
+directory. If you run `myn connect` from `~/projects`, it targets the remote
+root itself. Running outside the configured local root fails before SSH.
+
 ## Hetzner Authentication
 
 ```sh
-go run ./cmd/myn auth hetzner
+myn auth hetzner
 ```
 
 The command validates that a Hetzner Cloud API token is a Read & Write token and
@@ -124,8 +170,8 @@ default the config path is
 Non-interactive options:
 
 ```sh
-go run ./cmd/myn auth hetzner --token "$HCLOUD_TOKEN"
-go run ./cmd/myn auth hetzner --from-hcloud-context warptech
+myn auth hetzner --token "$HCLOUD_TOKEN"
+myn auth hetzner --from-hcloud-context warptech
 ```
 
 When no token is supplied, the command checks an existing `myn` token first, then
@@ -225,14 +271,14 @@ a Rust toolchain.
 ## Connect
 
 ```sh
-go run ./cmd/myn connect
-go run ./cmd/myn c
-go run ./cmd/myn c 2
-go run ./cmd/myn connect-new
-go run ./cmd/myn cn
-go run ./cmd/myn sessions
-go run ./cmd/myn s
-go run ./cmd/myn l
+myn connect
+myn c
+myn c 2
+myn connect-new
+myn cn
+myn sessions
+myn s
+myn l
 ```
 
 `myn connect` starts a Personal Server Connection using the saved Personal
