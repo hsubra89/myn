@@ -14,14 +14,11 @@ interactive provisioning flow, and then connect to it:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hsubra89/myn/master/go/cli/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
 myn version
 
-mkdir -p "$HOME/projects"
 myn auth hetzner
 myn configure
 
-cd "$HOME/projects"
 myn connect
 ```
 
