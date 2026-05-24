@@ -884,8 +884,8 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Install plan:",
 		"System services:",
 		"- security updates and unattended security upgrades",
-		"- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)",
-		"- Mosh Access",
+		"- Tailscale install, tailnet join, and Tailscale SSH Access",
+		"- system OpenSSH disabled after Tailscale SSH is enabled",
 		"- Docker Engine and Docker Compose",
 		"- Homebrew",
 		"Homebrew tools:",
@@ -906,6 +906,14 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 	for _, forbidden := range []string{"server-secret", "$6$"} {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("output should not reveal password material %q: %q", forbidden, output)
+		}
+	}
+	for _, forbidden := range []string{
+		"- hardened SSH daemon profile",
+		"- Mosh Access",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("install plan should not contain %q, got %q", forbidden, output)
 		}
 	}
 
@@ -1246,6 +1254,9 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 	}
 	if got, want := renderedInput.TailscaleMachineAuthKey, "tskey-auth-secret"; got != want {
 		t.Fatalf("bootstrap input auth key mismatch: want %q, got %q", want, got)
+	}
+	if got, want := renderedInput.TailscaleHost, "harish-personal-server"; got != want {
+		t.Fatalf("bootstrap input Tailscale Host mismatch: want %q, got %q", want, got)
 	}
 	if strings.Contains(out.String(), "tskey-auth-secret") {
 		t.Fatalf("Machine Auth Key should not be printed, got %q", out.String())

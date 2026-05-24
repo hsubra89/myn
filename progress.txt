@@ -58,3 +58,14 @@
 - Added tests for the Tailscale auth-key request shape, policy/key/cloud ordering, bootstrap renderer handoff, no config/stdout leakage, and create-key failure before cloud resources.
 - Updated Issue 5 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 6 as the next highest-priority unblocked task because Tailscale-first Bootstrap is the prerequisite for IPv6-only Hetzner provisioning and the remaining configure orchestration.
+- Updated Personal Server Bootstrap rendering so cloud-init no longer writes `ssh_authorized_keys`, installs and starts Tailscale before development tooling, writes the one-off Machine Auth Key through a root-only file, runs `tailscale up --auth-key=file:... --hostname ... --ssh`, removes the key after join, and hard-fails marker status on Tailscale join errors.
+- Replaced the legacy OpenSSH hardening profile step with system OpenSSH disablement after Tailscale SSH is enabled, with hard-fail marker behavior if disablement fails.
+- Removed Mosh from bootstrap packages, marker tool versions, and the Personal Server install plan while preserving Docker, Homebrew, tmux, Git, GitHub CLI, rustup, Go, nvm, Node, Codex, Claude Code, Git identity, and tmux profile behavior.
+- Passed the selected Tailscale Host into bootstrap rendering and kept the Machine Auth Key out of stdout and saved config.
+- Added Issue 11 for the remaining PRD gap where configure/provisioning still depends on a local SSH identity and Hetzner SSH Key outside the bootstrap renderer.
+- Updated Issue 6 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	personalServerBootstrapScriptPath     = "/usr/local/sbin/myn-personal-server-bootstrap.sh"
-	personalServerSSHHardeningProfilePath = "/etc/ssh/sshd_config.d/20-myn-hardening.conf"
+	personalServerBootstrapScriptPath  = "/usr/local/sbin/myn-personal-server-bootstrap.sh"
+	personalServerTailscaleAuthKeyPath = "/run/myn/tailscale-auth-key"
 )
 
 //go:embed personal_server_tmux.conf
@@ -20,7 +20,7 @@ var personalServerTmuxProfile string
 type personalServerBootstrapInput struct {
 	User                    string
 	PasswordHash            string
-	SSHPublicKey            string
+	TailscaleHost           string
 	TailscaleMachineAuthKey string
 	RemoteProjectRoot       string
 	GitIdentity             personalServerGitIdentity
@@ -91,17 +91,12 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 		Groups:                  []string{"docker"},
 		Users: []personalServerCloudInitUser{
 			{
-				Name:              "root",
-				SSHAuthorizedKeys: []string{strings.TrimSpace(input.SSHPublicKey)},
-			},
-			{
-				Name:              input.User,
-				Shell:             "/bin/bash",
-				Groups:            "sudo,docker",
-				Sudo:              "ALL=(ALL:ALL) ALL",
-				LockPasswd:        &lockPassword,
-				Passwd:            input.PasswordHash,
-				SSHAuthorizedKeys: []string{strings.TrimSpace(input.SSHPublicKey)},
+				Name:       input.User,
+				Shell:      "/bin/bash",
+				Groups:     "sudo,docker",
+				Sudo:       "ALL=(ALL:ALL) ALL",
+				LockPasswd: &lockPassword,
+				Passwd:     input.PasswordHash,
 			},
 		},
 		WriteFiles: []personalServerCloudInitWriteFile{
@@ -129,8 +124,11 @@ func validatePersonalServerBootstrapInput(input personalServerBootstrapInput) er
 	if strings.TrimSpace(input.PasswordHash) == "" {
 		return fmt.Errorf("Personal Server User password hash is required")
 	}
-	if strings.TrimSpace(input.SSHPublicKey) == "" {
-		return fmt.Errorf("SSH public key is required")
+	if err := validatePersonalServerName(input.TailscaleHost); err != nil {
+		return fmt.Errorf("Tailscale Host: %w", err)
+	}
+	if strings.TrimSpace(input.TailscaleMachineAuthKey) == "" {
+		return fmt.Errorf("Tailscale Machine Auth Key is required")
 	}
 	if _, err := normalizeRemoteProjectRoot(input.RemoteProjectRoot); err != nil {
 		return err
@@ -172,9 +170,10 @@ func renderPersonalServerBootstrapScript(input personalServerBootstrapInput) str
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "export MYN_USER=%s\n", shellQuote(input.User))
 	fmt.Fprintf(&b, "MYN_REMOTE_PROJECT_ROOT=%s\n", shellQuote(remoteRootPath))
+	fmt.Fprintf(&b, "MYN_TAILSCALE_HOST=%s\n", shellQuote(input.TailscaleHost))
+	fmt.Fprintf(&b, "MYN_TAILSCALE_AUTH_KEY_FILE=%s\n", shellQuote(personalServerTailscaleAuthKeyPath))
 	fmt.Fprintln(&b, "MYN_MARKER_DIR='/var/lib/myn'")
 	fmt.Fprintln(&b, "MYN_MARKER=\"$MYN_MARKER_DIR/personal-server-bootstrap.json\"")
-	fmt.Fprintf(&b, "MYN_SSH_HARDENING_PROFILE=%s\n", shellQuote(personalServerSSHHardeningProfilePath))
 	fmt.Fprintln(&b, "MYN_REBOOT_REQUIRED='false'")
 	fmt.Fprintf(&b, "MYN_HOMEBREW_TOOLS=(%s)\n", shellArray(input.ToolPlan.HomebrewTools))
 	fmt.Fprintf(&b, "MYN_SKIPPED_GIT_IDENTITY=(%s)\n", shellArray(skippedGitIdentity))
@@ -224,9 +223,9 @@ def user_shell(command):
     return user_command(["bash", "-lc", command])
 
 tool_commands = {
+    "tailscale": ["tailscale", "version"],
     "docker": ["docker", "--version"],
     "dockerCompose": ["docker", "compose", "version"],
-    "mosh": ["mosh-server", "--version"],
     "brew": user_command(["/home/linuxbrew/.linuxbrew/bin/brew", "--version"]),
     "tmux": ["/home/linuxbrew/.linuxbrew/bin/tmux", "-V"],
     "jq": ["/home/linuxbrew/.linuxbrew/bin/jq", "--version"],
@@ -258,13 +257,46 @@ os.chmod(path, 0o644)
 PY
 }
 
-fail_ssh_hardening() {
+cleanup_tailscale_auth_key() {
+  rm -f "$MYN_TAILSCALE_AUTH_KEY_FILE" 2>/dev/null || true
+}
+
+fail_tailscale_join() {
   local reason="$1"
-  local failure="Personal Server SSH Hardening Profile failed to apply: $reason"
+  local failure="Personal Server Tailscale join failed: $reason"
   echo "$failure" >&2
-  rm -f "$MYN_SSH_HARDENING_PROFILE" 2>/dev/null || true
+  cleanup_tailscale_auth_key
   write_marker "failed" "$failure"
   exit 1
+}
+
+fail_openssh_disable() {
+  local reason="$1"
+  local failure="Personal Server system OpenSSH disablement failed: $reason"
+  echo "$failure" >&2
+  write_marker "failed" "$failure"
+  exit 1
+}
+
+systemctl_unit_exists() {
+  systemctl list-unit-files "$1" --no-legend 2>/dev/null | grep -q "^$1"
+}
+
+disable_systemd_unit_now() {
+  local unit="$1"
+  if systemctl_unit_exists "$unit"; then
+    if ! systemctl disable --now "$unit"; then
+      fail_openssh_disable "could not disable $unit"
+    fi
+  fi
+}
+
+disable_system_openssh() {
+  disable_systemd_unit_now ssh
+  disable_systemd_unit_now sshd
+  if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
+    fail_openssh_disable "OpenSSH service is still active"
+  fi
 }
 
 mark_failed() {
@@ -290,7 +322,27 @@ func writePersonalServerBootstrapSteps(b *strings.Builder, input personalServerB
 	fmt.Fprintln(b, `export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg lsb-release unattended-upgrades apt-transport-https build-essential procps file git sudo mosh
+apt-get install -y ca-certificates curl gnupg lsb-release apt-transport-https sudo
+install -m 0755 -d /usr/share/keyrings
+. /etc/os-release
+curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
+apt-get update
+apt-get install -y tailscale
+systemctl enable --now tailscaled
+install -d -m 0700 "$(dirname "$MYN_TAILSCALE_AUTH_KEY_FILE")"
+install -m 0600 /dev/null "$MYN_TAILSCALE_AUTH_KEY_FILE"
+cat >"$MYN_TAILSCALE_AUTH_KEY_FILE" <<'MYN_TAILSCALE_AUTH_KEY'`)
+	fmt.Fprintln(b, strings.TrimSpace(input.TailscaleMachineAuthKey))
+	fmt.Fprintln(b, `MYN_TAILSCALE_AUTH_KEY
+chmod 0600 "$MYN_TAILSCALE_AUTH_KEY_FILE"
+if ! tailscale up --auth-key="file:$MYN_TAILSCALE_AUTH_KEY_FILE" --hostname="$MYN_TAILSCALE_HOST" --ssh; then
+  fail_tailscale_join "tailscale up failed"
+fi
+cleanup_tailscale_auth_key
+disable_system_openssh
+
+apt-get install -y unattended-upgrades build-essential procps file git sudo
 apt-get -y upgrade
 systemctl enable --now unattended-upgrades
 cat >/etc/apt/apt.conf.d/20auto-upgrades <<'APTCONF'
@@ -362,67 +414,7 @@ if [ -f /var/run/reboot-required ]; then
   MYN_REBOOT_REQUIRED='true'
 fi
 
-if ! install -d -m 0755 /etc/ssh/sshd_config.d; then
-  fail_ssh_hardening "could not create sshd_config.d"
-fi
-if ! cat >"$MYN_SSH_HARDENING_PROFILE" <<'SSHDHARDENING'
-`)
-	fmt.Fprint(b, renderPersonalServerSSHHardeningProfile(input.User))
-	fmt.Fprintln(b, `SSHDHARDENING
-then
-  fail_ssh_hardening "could not write $MYN_SSH_HARDENING_PROFILE"
-fi
-if ! chmod 0644 "$MYN_SSH_HARDENING_PROFILE"; then
-  fail_ssh_hardening "could not secure $MYN_SSH_HARDENING_PROFILE"
-fi
-if ! sshd -t; then
-  fail_ssh_hardening "sshd configuration validation failed"
-fi
-if ! systemctl reload ssh; then
-  if ! systemctl reload sshd; then
-    fail_ssh_hardening "SSH service reload failed"
-  fi
-fi
-
 write_marker "success" ""`)
-}
-
-func renderPersonalServerSSHHardeningProfile(user string) string {
-	return fmt.Sprintf(`# Hardened SSH daemon settings for Myn Personal Servers.
-# Installed by Personal Server Bootstrap after key-only user login works.
-
-PermitRootLogin no
-AllowUsers %s
-
-PubkeyAuthentication yes
-RequiredRSASize 3072
-AuthenticationMethods publickey
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PermitEmptyPasswords no
-
-StrictModes yes
-HostbasedAuthentication no
-IgnoreRhosts yes
-
-LoginGraceTime 30
-MaxAuthTries 3
-MaxStartups 10:30:60
-PerSourceMaxStartups 5
-
-X11Forwarding no
-AllowAgentForwarding no
-AllowTcpForwarding local
-GatewayPorts no
-PermitTunnel no
-PermitUserEnvironment no
-
-LogLevel VERBOSE
-DebianBanner no
-
-ClientAliveInterval 300
-ClientAliveCountMax 2
-`, user)
 }
 
 func skippedPersonalServerGitIdentity(identity personalServerGitIdentity) []string {

@@ -143,22 +143,24 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Update Personal Server Bootstrap cloud-init so Tailscale install and join happen first, Tailscale SSH is enabled, system OpenSSH is disabled, and the rest of the development environment installs through the existing bootstrap path. Remove local SSH key injection and Mosh from new bootstrap output.
 
 ## Acceptance criteria
 
-- [ ] Cloud-init no longer writes `ssh_authorized_keys` for root or the Personal Server User.
-- [ ] Bootstrap installs Tailscale before Docker, Homebrew, coding agents, and other development tools.
-- [ ] Bootstrap runs `tailscale up` with the generated Machine Auth Key, selected Tailscale Host, and Tailscale SSH enabled.
-- [ ] The Machine Auth Key is handled through a root-only file and removed after successful Tailscale join.
-- [ ] Tailscale install or join failure hard-fails bootstrap.
-- [ ] System OpenSSH is disabled after Tailscale SSH is enabled, and failure to disable it hard-fails bootstrap.
-- [ ] Mosh is not installed, not included in tool versions, and not mentioned in the install plan.
-- [ ] The bootstrap marker includes the installed Tailscale version.
-- [ ] Existing Docker, Homebrew, tmux, Git, GitHub CLI, rustup, Go, nvm, Node, Codex, Claude Code, Git identity, and tmux profile behavior is preserved.
-- [ ] Tests cover rendered cloud-init, rendered shell script, secret non-leakage, removal of Mosh and OpenSSH hardening profile behavior, marker versions, and valid Bash.
+- [x] Cloud-init no longer writes `ssh_authorized_keys` for root or the Personal Server User.
+- [x] Bootstrap installs Tailscale before Docker, Homebrew, coding agents, and other development tools.
+- [x] Bootstrap runs `tailscale up` with the generated Machine Auth Key, selected Tailscale Host, and Tailscale SSH enabled.
+- [x] The Machine Auth Key is handled through a root-only file and removed after successful Tailscale join.
+- [x] Tailscale install or join failure hard-fails bootstrap.
+- [x] System OpenSSH is disabled after Tailscale SSH is enabled, and failure to disable it hard-fails bootstrap.
+- [x] Mosh is not installed, not included in tool versions, and not mentioned in the install plan.
+- [x] The bootstrap marker includes the installed Tailscale version.
+- [x] Existing Docker, Homebrew, tmux, Git, GitHub CLI, rustup, Go, nvm, Node, Codex, Claude Code, Git identity, and tmux profile behavior is preserved.
+- [x] Tests cover rendered cloud-init, rendered shell script, secret non-leakage, removal of Mosh and OpenSSH hardening profile behavior, marker versions, and valid Bash.
 
 ## Blocked by
 
@@ -189,6 +191,7 @@ Change Hetzner provisioning so new Personal Servers are IPv6-only from the publi
 ## Blocked by
 
 - Issue 6: Render Tailscale-first Personal Server Bootstrap
+- Issue 11: Remove local SSH identity from Personal Server provisioning
 
 ## Issue 8: Orchestrate Tailscale-only configure completion
 
@@ -280,3 +283,28 @@ Update user-facing documentation and live validation so the Tailscale-only provi
 - Issue 7: Provision IPv6-only Hetzner servers with no public ingress
 - Issue 8: Orchestrate Tailscale-only configure completion
 - Issue 9: Verify existing Tailscale Personal Server configuration
+- Issue 11: Remove local SSH identity from Personal Server provisioning
+
+## Issue 11: Remove local SSH identity from Personal Server provisioning
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+## What to build
+
+Finish removing the legacy local SSH identity dependency from new Personal Server creation. `myn configure` should not require or generate a local SSH identity before entering Personal Server provisioning, and Hetzner server creation should not upload or attach a Myn SSH Key. This completes the PRD objective that provisioning is tied to Tailscale identity rather than local key material.
+
+## Acceptance criteria
+
+- [ ] Personal Server creation is not skipped when `ssh.identityFile` is empty, as long as Hetzner Credentials, Tailscale Credentials, and LocalAPI preflight are valid.
+- [ ] Interactive configure no longer prompts to generate, select, add, or validate an SSH identity solely for Personal Server provisioning.
+- [ ] Hetzner server creation does not create, reuse, upload, or attach a `myn-personal-server` SSH Key for new Tailscale-only Personal Servers.
+- [ ] The final creation plan does not show an SSH key as part of the Personal Server access model.
+- [ ] Personal Server Bootstrap input has no SSH public key field and does not depend on configured SSH identity state.
+- [ ] Existing project root, Git identity, Personal Server User, Tailscale Host, Tailnet Policy, Machine Auth Key, and cloud-init rendering behavior is preserved.
+- [ ] Tests cover missing SSH identity with successful preview, server create request without SSH key, no SSH-key output, and no regression to connection command behavior.
+
+## Blocked by
+
+- Issue 6: Render Tailscale-first Personal Server Bootstrap

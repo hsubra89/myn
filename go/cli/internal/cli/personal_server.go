@@ -473,7 +473,7 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	userData, err := gate.renderPersonalServerBootstrap(personalServerBootstrapInput{
 		User:                    plan.User,
 		PasswordHash:            plan.PasswordHash,
-		SSHPublicKey:            identity.PublicKey.Line(),
+		TailscaleHost:           plan.ServerName,
 		TailscaleMachineAuthKey: machineAuthKey.Key,
 		RemoteProjectRoot:       plan.RemoteProjectRoot,
 		GitIdentity:             plan.GitIdentity,
@@ -1294,8 +1294,8 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintln(out, "Install plan:")
 	fmt.Fprintln(out, "System services:")
 	fmt.Fprintln(out, "- security updates and unattended security upgrades")
-	fmt.Fprintln(out, "- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)")
-	fmt.Fprintln(out, "- Mosh Access")
+	fmt.Fprintln(out, "- Tailscale install, tailnet join, and Tailscale SSH Access")
+	fmt.Fprintln(out, "- system OpenSSH disabled after Tailscale SSH is enabled")
 	fmt.Fprintln(out, "- Docker Engine and Docker Compose")
 	fmt.Fprintln(out, "- Personal Server User in docker group (root-equivalent access)")
 	fmt.Fprintln(out, "- Homebrew")
