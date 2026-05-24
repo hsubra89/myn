@@ -7,18 +7,15 @@ import (
 
 func TestPersonalServerSSHCommandArgsPassLoginAndHostSeparately(t *testing.T) {
 	got := personalServerSSHCommandArgs(
-		"/home/harish/.ssh/id_ed25519",
 		" harish ",
-		" 2001:db8::55 ",
+		" harish-personal-server ",
 		"-o", "BatchMode=yes",
 	)
 	want := []string{
 		"ssh",
 		"-o", "BatchMode=yes",
-		"-o", "IdentitiesOnly=yes",
-		"-i", "/home/harish/.ssh/id_ed25519",
 		"-l", "harish",
-		"2001:db8::55",
+		"harish-personal-server",
 	}
 
 	if !reflect.DeepEqual(got, want) {

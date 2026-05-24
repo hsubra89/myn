@@ -196,8 +196,7 @@ func TestRunConfigureValidatesProposedTailnetPolicyBeforeFinalConfirmation(t *te
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			tailnetPolicyEnabled:    true,
@@ -281,8 +280,7 @@ func TestRunConfigureDeclinedTailnetPolicyEditDoesNotCreateCloudResources(t *tes
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			tailnetPolicyEnabled:    true,
@@ -354,8 +352,7 @@ func TestRunConfigureAppliesTailnetPolicyWithETagBeforeCloudResources(t *testing
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			tailnetPolicyEnabled:    true,
@@ -446,8 +443,7 @@ func TestRunConfigureReReadsNoopTailnetPolicyAfterFinalConfirmation(t *testing.T
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			tailnetPolicyEnabled:    true,

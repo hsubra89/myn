@@ -208,11 +208,6 @@ type personalServerProvisioningGate struct {
 	tailscaleAccessTimeout           time.Duration
 	sshPollInterval                  time.Duration
 	userHomeDir                      func() (string, error)
-	stat                             func(string) (os.FileInfo, error)
-	readFile                         func(string) ([]byte, error)
-	writeFile                        func(string, []byte, os.FileMode) error
-	chmod                            func(string, os.FileMode) error
-	sshPublicKey                     func(string) (string, error)
 	currentUsername                  func() string
 	gitConfigValue                   func(scope personalServerGitConfigScope, key string) (string, bool)
 	passwordSaltReader               io.Reader
@@ -547,7 +542,7 @@ const (
 	defaultPersonalServerSSHPollWait   = 5 * time.Second
 )
 
-type personalServerSSHRunner func(ctx context.Context, identityFile string, user string, host string, command string) (string, error)
+type personalServerSSHRunner func(ctx context.Context, user string, host string, command string) (string, error)
 
 type personalServerTailscaleSSHCheckRunner func(ctx context.Context, out io.Writer, user string, host string, command string) error
 
@@ -573,7 +568,7 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 	defer cancel()
 
 	for {
-		output, err := runner(pollCtx, "", user, host, "cat "+personalServerBootstrapMarkerPath)
+		output, err := runner(pollCtx, user, host, "cat "+personalServerBootstrapMarkerPath)
 		if err == nil {
 			marker, parseErr := parsePersonalServerBootstrapMarker(output)
 			if parseErr == nil {
@@ -843,7 +838,7 @@ func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner
 	}
 	if gate.runSSH != nil {
 		return func(ctx context.Context, _ io.Writer, user string, host string, command string) error {
-			output, err := gate.runSSH(ctx, "", user, host, command)
+			output, err := gate.runSSH(ctx, user, host, command)
 			if err == nil {
 				return nil
 			}
@@ -856,18 +851,13 @@ func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner
 	return defaultPersonalServerTailscaleSSHCheckRunner
 }
 
-func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
+func defaultPersonalServerSSHRunner(ctx context.Context, user string, host string, command string) (string, error) {
 	options := []string{
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
 	}
-	var args []string
-	if strings.TrimSpace(identityFile) == "" {
-		args = personalServerTailscaleSSHCommandArgs(user, host, options...)
-	} else {
-		args = personalServerSSHCommandArgs(identityFile, user, host, options...)
-	}
+	args := personalServerSSHCommandArgs(user, host, options...)
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	output, err := cmd.CombinedOutput()
@@ -885,7 +875,7 @@ func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Wr
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
 	}
-	args := personalServerTailscaleSSHCommandArgs(user, host, options...)
+	args := personalServerSSHCommandArgs(user, host, options...)
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
@@ -1099,25 +1089,6 @@ func personalServerServerLabels(tailscaleHost string) map[string]string {
 	return labels
 }
 
-func (gate personalServerProvisioningGate) loadPersonalServerSSHIdentity(identityFile string) (sshIdentityCandidate, error) {
-	home, err := gate.personalServerUserHomeDir()
-	if err != nil {
-		return sshIdentityCandidate{}, fmt.Errorf("find user home directory: %w", err)
-	}
-
-	candidate, err := loadSSHIdentity(identityFile, home, configureDeps{
-		stat:         gate.personalServerStat(),
-		readFile:     gate.personalServerReadFile(),
-		writeFile:    gate.personalServerWriteFile(),
-		chmod:        gate.personalServerChmod(),
-		sshPublicKey: gate.personalServerSSHPublicKey(),
-	})
-	if err != nil {
-		return sshIdentityCandidate{}, fmt.Errorf("load configured SSH identity for Personal Server: %w", err)
-	}
-	return candidate, nil
-}
-
 func (gate personalServerProvisioningGate) collectPersonalServerCreationInputs(prompter configurePrompter, defaultIdentity string) (personalServerCreationInputs, error) {
 	if strings.TrimSpace(defaultIdentity) == "" {
 		defaultIdentity = gate.personalServerCurrentUsername()
@@ -1274,47 +1245,6 @@ func (gate personalServerProvisioningGate) personalServerUserHomeDir() (string, 
 		return gate.userHomeDir()
 	}
 	return os.UserHomeDir()
-}
-
-func (gate personalServerProvisioningGate) personalServerStat() func(string) (os.FileInfo, error) {
-	if gate.stat != nil {
-		return gate.stat
-	}
-	return os.Stat
-}
-
-func (gate personalServerProvisioningGate) personalServerReadFile() func(string) ([]byte, error) {
-	if gate.readFile != nil {
-		return gate.readFile
-	}
-	return os.ReadFile
-}
-
-func (gate personalServerProvisioningGate) personalServerWriteFile() func(string, []byte, os.FileMode) error {
-	if gate.writeFile != nil {
-		return gate.writeFile
-	}
-	return os.WriteFile
-}
-
-func (gate personalServerProvisioningGate) personalServerChmod() func(string, os.FileMode) error {
-	if gate.chmod != nil {
-		return gate.chmod
-	}
-	return os.Chmod
-}
-
-func (gate personalServerProvisioningGate) personalServerSSHPublicKey() func(string) (string, error) {
-	if gate.sshPublicKey != nil {
-		return gate.sshPublicKey
-	}
-	return func(identityPath string) (string, error) {
-		output, err := exec.Command("ssh-keygen", "-y", "-f", identityPath).CombinedOutput()
-		if err != nil {
-			return "", commandOutputError("ssh-keygen -y", output, err)
-		}
-		return string(output), nil
-	}
 }
 
 func hashPersonalServerPassword(password string, saltReader io.Reader) (string, error) {

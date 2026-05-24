@@ -363,7 +363,6 @@ func TestRunConfigureClearsStaleTailscalePersonalServerConfigurationWhenInteract
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey:              testSSHPublicKeyFunc(identity),
 		prompter:                  prompter,
 		personalServerProvisioner: gate,
 	}); err != nil {
@@ -429,8 +428,7 @@ func TestRunConfigureFailsForStaleTailscalePersonalServerConfigurationWhenNonInt
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: false},
+		prompter: &fakeConfigurePrompter{canPrompt: false},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -498,8 +496,7 @@ func TestRunConfigureClearsIncompletePersonalServerConfigurationWhenInteractive(
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -571,8 +568,7 @@ func TestRunConfigureFailsForIncompletePersonalServerConfigurationWhenNonInterac
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: false},
+		prompter: &fakeConfigurePrompter{canPrompt: false},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -631,8 +627,7 @@ func TestRunConfigureSkipsPersonalServerWhenTailscaleCredentialsMissing(t *testi
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -678,8 +673,7 @@ func TestRunConfigureFailsWhenLocalTailscaleDaemonUnavailable(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
 				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
@@ -730,8 +724,7 @@ func TestRunConfigureFailsWhenLocalTailscaleDaemonDisconnected(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
 				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
@@ -786,8 +779,7 @@ func TestRunConfigureFailsWhenLocalTailnetMismatchesSavedCredentials(t *testing.
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
 				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
@@ -941,7 +933,6 @@ func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			passwords: []string{"server-secret", "server-secret"},
@@ -1011,8 +1002,7 @@ func TestRunConfigurePreviewsLocationAndEligibleServerTypes(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(token string) personalServerCloudClient {
@@ -1142,7 +1132,6 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey:              testSSHPublicKeyFunc(identity),
 		prompter:                  prompter,
 		personalServerProvisioner: gate,
 	}); err != nil {
@@ -1276,8 +1265,7 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -1381,7 +1369,6 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey:              testSSHPublicKeyFunc(identity),
 		prompter:                  prompter,
 		personalServerProvisioner: gate,
 	}); err != nil {
@@ -1536,8 +1523,7 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			tailnetPolicyEnabled:    true,
@@ -1631,7 +1617,6 @@ func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudResources(t *
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -1748,8 +1733,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -1772,8 +1756,8 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: "true"},
+		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1853,7 +1837,6 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -1883,9 +1866,9 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: "true"},
+		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1937,7 +1920,6 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -1967,10 +1949,10 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: "true"},
+		{user: "harish", host: "harish-personal-server", command: "true"},
+		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -2012,7 +1994,6 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -2097,7 +2078,6 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -2186,8 +2166,7 @@ func TestRunConfigureCancellationBeforeServerCreationDoesNotSavePersonalServer(t
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -2246,7 +2225,6 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -2316,7 +2294,6 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -2333,7 +2310,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH: func(context.Context, string, string, string, string) (string, error) {
+			runSSH: func(context.Context, string, string, string) (string, error) {
 				sshCalls++
 				cancel()
 				return "", errors.New("connection refused")
@@ -2389,7 +2366,6 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -2406,7 +2382,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH: func(_ context.Context, _ string, _ string, _ string, command string) (string, error) {
+			runSSH: func(_ context.Context, _ string, _ string, command string) (string, error) {
 				sshCalls++
 				if command == "true" {
 					return "ready\n", nil
@@ -2477,8 +2453,7 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -2578,7 +2553,7 @@ func TestRunConfigureReportsTailscaleDeviceTimeoutButKeepsSavedServer(t *testing
 		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
 			return devices
 		},
-		runSSH: func(context.Context, string, string, string, string) (string, error) {
+		runSSH: func(context.Context, string, string, string) (string, error) {
 			sshCalls++
 			return "", errors.New("ssh should not run before Tailscale device readiness")
 		},
@@ -2709,7 +2684,7 @@ func TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer(t *testing.T)
 		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
 			return devices
 		},
-		runSSH: func(context.Context, string, string, string, string) (string, error) {
+		runSSH: func(context.Context, string, string, string) (string, error) {
 			sshCalls++
 			return "Open this URL to approve Tailscale SSH: https://login.tailscale.com/a/check\n", errors.New("exit status 1")
 		},
@@ -2784,8 +2759,7 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -2870,8 +2844,7 @@ func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -2952,8 +2925,7 @@ func TestRunConfigureFailsForUnmanagedExistingFirewallBeforeServerCreation(t *te
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -3177,8 +3149,7 @@ func TestRunConfigureLocationFallbackDefaultIsFirstSortedCode(t *testing.T) {
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -3241,8 +3212,7 @@ func TestRunConfigureReturnsToLocationSelectionWhenNoServerTypesAreEligible(t *t
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
-		prompter:     prompter,
+		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
@@ -3452,7 +3422,6 @@ func runConfigurePersonalServerCreationTest(t *testing.T, gate personalServerPro
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
-		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter: &fakeConfigurePrompter{
 			canPrompt: true,
 			inputs:    []string{"harish", "harish-personal-server"},
@@ -3476,10 +3445,9 @@ func assertSavedPersonalServerConfig(t *testing.T, configPath string) {
 }
 
 type personalServerSSHCall struct {
-	identityFile string
-	user         string
-	host         string
-	command      string
+	user    string
+	host    string
+	command string
 }
 
 type fakePersonalServerSSHRunner struct {
@@ -3497,12 +3465,11 @@ func newSuccessfulPersonalServerSSHRunner() *fakePersonalServerSSHRunner {
 	}
 }
 
-func (r *fakePersonalServerSSHRunner) Run(_ context.Context, identityFile string, user string, host string, command string) (string, error) {
+func (r *fakePersonalServerSSHRunner) Run(_ context.Context, user string, host string, command string) (string, error) {
 	r.calls = append(r.calls, personalServerSSHCall{
-		identityFile: identityFile,
-		user:         user,
-		host:         host,
-		command:      command,
+		user:    user,
+		host:    host,
+		command: command,
 	})
 	if len(r.errors) > 0 {
 		err := r.errors[0]

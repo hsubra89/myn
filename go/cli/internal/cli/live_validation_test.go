@@ -377,14 +377,11 @@ func liveValidationHcloudClient(token string) *hcloud.Client {
 }
 
 func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
-	return func(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-		if strings.TrimSpace(identityFile) != "" {
-			return "", fmt.Errorf("live validation expected Tailscale SSH without an identity file, got %q", identityFile)
-		}
+	return func(ctx context.Context, user string, host string, command string) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
 			return "", fmt.Errorf("create isolated SSH known_hosts directory: %w", err)
 		}
-		args := personalServerTailscaleSSHCommandArgs(user, host,
+		args := personalServerSSHCommandArgs(user, host,
 			"-o", "BatchMode=yes",
 			"-o", "StrictHostKeyChecking=accept-new",
 			"-o", "UserKnownHostsFile="+knownHostsPath,
@@ -696,7 +693,7 @@ func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHos
 
 func liveValidationSSH(t *testing.T, ctx context.Context, knownHostsPath string, user string, host string, command string) string {
 	t.Helper()
-	output, err := liveValidationSSHRunner(knownHostsPath)(ctx, "", user, host, command)
+	output, err := liveValidationSSHRunner(knownHostsPath)(ctx, user, host, command)
 	if err != nil {
 		t.Fatalf("run live SSH command as %s: %v", user, err)
 	}

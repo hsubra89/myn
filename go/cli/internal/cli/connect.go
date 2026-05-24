@@ -307,7 +307,7 @@ func validateExistingDirectory(stat func(string) (os.FileInfo, error), value str
 }
 
 func connectSSHCommand(plan connectPlan, mode connectProjectSessionMode, sessionNumber int) []string {
-	command := personalServerTailscaleSSHCommandArgs(
+	command := personalServerSSHCommandArgs(
 		plan.sshUser,
 		plan.sshHost,
 		"-t",
@@ -317,7 +317,7 @@ func connectSSHCommand(plan connectPlan, mode connectProjectSessionMode, session
 }
 
 func sessionsSSHCommand(plan connectPlan) []string {
-	command := personalServerTailscaleSSHCommandArgs(
+	command := personalServerSSHCommandArgs(
 		plan.sshUser,
 		plan.sshHost,
 		"-o", "StrictHostKeyChecking=accept-new",

@@ -363,3 +363,26 @@ Remove the remaining dead Personal Server provisioning surfaces from the old pub
 ## Blocked by
 
 - Issue 11: Remove local SSH identity from Personal Server provisioning
+
+## Issue 14: Remove identity-file branch from Personal Server SSH runner
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Remove the remaining Personal Server SSH command path that accepts an SSH identity file. Personal Server bootstrap polling and live validation should use the same Tailscale-only ordinary `ssh` shape as `myn connect`, with no `-i` or `IdentitiesOnly=yes` branch left in the Personal Server runner.
+
+## Acceptance criteria
+
+- [x] Personal Server SSH command argument construction accepts only Personal Server User, Tailscale Host, and SSH options.
+- [x] Personal Server bootstrap marker polling cannot pass or format an SSH identity file.
+- [x] Live validation SSH checks cannot pass or format an SSH identity file.
+- [x] Tests cover the identity-free SSH command shape and existing Tailscale-only configure behavior still passes.
+
+## Blocked by
+
+- Issue 13: Remove stale public-SSH and Mosh provisioning surfaces
