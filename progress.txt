@@ -148,3 +148,12 @@
 - Documented the gated `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v` command in `go/cli/README.md`.
 - Updated Issue 10 status and added the completed gated harness acceptance criterion while leaving the real billable live validation criteria pending for a human.
 - Verified with focused live-validation tests, `git diff --check`, and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Updated the generated Personal Server Bootstrap script to disable and verify `ssh.service` and `sshd.service` in addition to the socket units and legacy bare unit names, so Ubuntu's real OpenSSH units cannot remain active unnoticed.
+- Changed Tailscale SSH reachability waiting to use an interactive Tailscale SSH check path for the first reachable command and to print distinct SSH failure output, including required Tailscale check URLs, while polling.
+- Changed configure's SSH identity setup gate so missing Tailscale Credentials no longer trigger legacy SSH identity setup when Hetzner Credentials are present; the Personal Server path now reaches the `myn auth tailscale` guidance first.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrapScriptDisablesOpenSSHUnits|TestRunConfigureMissingTailscaleCredentialsSkipsSSHIdentitySetup|TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer'` and `go test ./...` from `go/cli`.

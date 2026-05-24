@@ -214,6 +214,7 @@ type personalServerProvisioningGate struct {
 	saveConfig                       func(path string, cfg appConfig) error
 	renderBootstrap                  func(personalServerBootstrapInput) (string, error)
 	runSSH                           personalServerSSHRunner
+	runTailscaleSSHCheck             personalServerTailscaleSSHCheckRunner
 	sleep                            func(context.Context, time.Duration) error
 	bootstrapTimeout                 time.Duration
 	tailscaleAccessTimeout           time.Duration
@@ -564,6 +565,8 @@ const (
 
 type personalServerSSHRunner func(ctx context.Context, identityFile string, user string, host string, command string) (string, error)
 
+type personalServerTailscaleSSHCheckRunner func(ctx context.Context, out io.Writer, user string, host string, command string) error
+
 type personalServerBootstrapMarker struct {
 	Status             string            `json:"status"`
 	Timestamp          string            `json:"timestamp"`
@@ -619,7 +622,7 @@ func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleAccess(
 	}
 
 	fmt.Fprintf(out, "Waiting for Tailscale SSH reachability: %s@%s\n", plan.User, plan.ServerName)
-	return gate.waitForPersonalServerSSHReachability(accessCtx, plan.User, plan.ServerName)
+	return gate.waitForPersonalServerSSHReachability(accessCtx, out, plan.User, plan.ServerName)
 }
 
 func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleDevice(ctx context.Context, client personalServerTailscaleDeviceClient, host string) (personalServerTailscaleDevice, error) {
@@ -650,13 +653,16 @@ func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleDevice(
 	}
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(ctx context.Context, user string, host string) error {
-	runner := gate.personalServerSSHRunner()
+func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(ctx context.Context, out io.Writer, user string, host string) error {
+	runner := gate.personalServerTailscaleSSHCheckRunner()
 	timeout := gate.personalServerTailscaleAccessTimeout()
 	waitingFor := fmt.Sprintf("Tailscale SSH reachability to %s@%s", strings.TrimSpace(user), strings.TrimSpace(host))
+	lastFailure := ""
 	for {
-		if _, err := runner(ctx, "", user, host, "true"); err == nil {
+		if err := runner(ctx, out, user, host, "true"); err == nil {
 			return nil
+		} else {
+			writePersonalServerSSHReachabilityFailure(out, err, &lastFailure)
 		}
 		if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
 			return waitErr
@@ -668,6 +674,21 @@ func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(
 			return err
 		}
 	}
+}
+
+func writePersonalServerSSHReachabilityFailure(out io.Writer, err error, lastFailure *string) {
+	if err == nil {
+		return
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" || message == *lastFailure {
+		return
+	}
+	fmt.Fprintf(out, "Tailscale SSH is not ready yet: %s\n", message)
+	*lastFailure = message
 }
 
 func personalServerTimeoutOrContextError(ctx context.Context, waitingFor string, timeout time.Duration) error {
@@ -904,6 +925,25 @@ func (gate personalServerProvisioningGate) personalServerSSHRunner() personalSer
 	return defaultPersonalServerSSHRunner
 }
 
+func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner() personalServerTailscaleSSHCheckRunner {
+	if gate.runTailscaleSSHCheck != nil {
+		return gate.runTailscaleSSHCheck
+	}
+	if gate.runSSH != nil {
+		return func(ctx context.Context, _ io.Writer, user string, host string, command string) error {
+			output, err := gate.runSSH(ctx, "", user, host, command)
+			if err == nil {
+				return nil
+			}
+			if strings.TrimSpace(output) != "" {
+				return commandOutputError("ssh", []byte(output), err)
+			}
+			return err
+		}
+	}
+	return defaultPersonalServerTailscaleSSHCheckRunner
+}
+
 func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
 	options := []string{
 		"-o", "BatchMode=yes",
@@ -923,6 +963,26 @@ func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, us
 		return "", commandOutputError("ssh", output, err)
 	}
 	return string(output), nil
+}
+
+func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Writer, user string, host string, command string) error {
+	if out == nil {
+		out = io.Discard
+	}
+	options := []string{
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10",
+	}
+	args := personalServerTailscaleSSHCommandArgs(user, host, options...)
+	args = append(args, command)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ssh: %w", err)
+	}
+	return nil
 }
 
 func (gate personalServerProvisioningGate) personalServerBootstrapTimeout() time.Duration {

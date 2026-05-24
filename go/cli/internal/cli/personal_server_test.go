@@ -2733,7 +2733,7 @@ func TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer(t *testing.T)
 		},
 		runSSH: func(context.Context, string, string, string, string) (string, error) {
 			sshCalls++
-			return "", errors.New("connection refused")
+			return "Open this URL to approve Tailscale SSH: https://login.tailscale.com/a/check\n", errors.New("exit status 1")
 		},
 		tailscaleAccessTimeout: time.Nanosecond,
 		sleep: func(ctx context.Context, _ time.Duration) error {
@@ -2755,6 +2755,9 @@ func TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer(t *testing.T)
 	}
 	if !strings.Contains(out, "Waiting for Tailscale SSH reachability: harish@harish-personal-server") {
 		t.Fatalf("expected SSH reachability progress output, got %q", out)
+	}
+	if !strings.Contains(out, "https://login.tailscale.com/a/check") {
+		t.Fatalf("expected Tailscale SSH check URL to be surfaced, got %q", out)
 	}
 	assertSavedPersonalServerConfig(t, configPath)
 }

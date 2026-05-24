@@ -199,7 +199,7 @@ func shouldConfigureSSHIdentity(opts configureOptions, cfg appConfig) bool {
 	if opts.sshIdentityFileSet {
 		return true
 	}
-	return strings.TrimSpace(cfg.Auth.Hetzner.Token) == "" || !cfg.Auth.Tailscale.isConfigured()
+	return strings.TrimSpace(cfg.Auth.Hetzner.Token) == ""
 }
 
 func configureLocalRoot(opts configureOptions, cfg appConfig, home string, deps configureDeps) (string, error) {

@@ -428,6 +428,47 @@ func TestRunConfigureNonInteractiveMissingSSHIdentitySavesRootsAndFails(t *testi
 	assertSavedSSHIdentity(t, configPath, "")
 }
 
+func TestRunConfigureMissingTailscaleCredentialsSkipsSSHIdentitySetup(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	prompter := &fakeConfigurePrompter{canPrompt: true}
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter: prompter,
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if len(prompter.sshCalls) != 0 {
+		t.Fatalf("configure should not prompt for SSH identity before missing Tailscale guidance, got %#v", prompter.sshCalls)
+	}
+	if !strings.Contains(out.String(), "Personal Server creation skipped: Tailscale Credentials are not configured. Run `myn auth tailscale` first.") {
+		t.Fatalf("expected missing Tailscale guidance, got %q", out.String())
+	}
+	assertSavedProjectsConfig(t, configPath, "projects", "projects")
+	assertSavedSSHIdentity(t, configPath, "")
+}
+
 func TestRunConfigureInvalidFlaggedSSHIdentityDoesNotProvisionWithStaleIdentity(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))

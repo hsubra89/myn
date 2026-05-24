@@ -122,9 +122,12 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"Personal Server system OpenSSH disablement failed",
 		"disable_systemd_unit_now ssh.socket",
 		"disable_systemd_unit_now sshd.socket",
+		"disable_systemd_unit_now ssh.service",
+		"disable_systemd_unit_now sshd.service",
 		"disable_systemd_unit_now ssh",
 		"systemctl disable --now \"$unit\"",
 		"systemctl is-active --quiet ssh.socket",
+		"systemctl is-active --quiet ssh.service",
 		"OpenSSH socket is still active",
 		"MYN_PARTIAL_FAILURES+=(\"Codex install failed\")",
 		"MYN_PARTIAL_FAILURES+=(\"Claude Code install failed\")",
@@ -166,7 +169,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	}
 }
 
-func TestRenderPersonalServerBootstrapScriptDisablesOpenSSHSockets(t *testing.T) {
+func TestRenderPersonalServerBootstrapScriptDisablesOpenSSHUnits(t *testing.T) {
 	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
 		User:                    "harish",
 		PasswordHash:            "$6$abcdefghijklmnop$hashed",
@@ -179,17 +182,19 @@ func TestRenderPersonalServerBootstrapScriptDisablesOpenSSHSockets(t *testing.T)
 	want := `disable_system_openssh() {
   disable_systemd_unit_now ssh.socket
   disable_systemd_unit_now sshd.socket
+  disable_systemd_unit_now ssh.service
+  disable_systemd_unit_now sshd.service
   disable_systemd_unit_now ssh
   disable_systemd_unit_now sshd
   if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
     fail_openssh_disable "OpenSSH socket is still active"
   fi
-  if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
+  if systemctl is-active --quiet ssh.service 2>/dev/null || systemctl is-active --quiet sshd.service 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
     fail_openssh_disable "OpenSSH service is still active"
   fi
 }`
 	if !strings.Contains(script, want) {
-		t.Fatalf("bootstrap script should disable and verify OpenSSH socket units:\n%s", script)
+		t.Fatalf("bootstrap script should disable and verify OpenSSH units:\n%s", script)
 	}
 }
 
