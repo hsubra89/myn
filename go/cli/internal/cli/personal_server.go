@@ -239,9 +239,16 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 		return nil
 	}
 
-	connectionState, _ := cfg.PersonalServer.connectionConfigState()
-	if connectionState == personalServerConnectionConfigReady {
+	connectionState, _ := cfg.PersonalServer.tailscaleConnectionConfigState()
+	if connectionState == personalServerConnectionConfigReady && cfg.PersonalServer.ServerID != 0 {
 		return gate.verifyConfiguredPersonalServer(ctx, out, appConfigPath, cfg, token, prompter)
+	}
+	if connectionState == personalServerConnectionConfigReady {
+		connectionState = personalServerConnectionConfigIncomplete
+	}
+	if connectionState == personalServerConnectionConfigLegacyPublicSSH {
+		fmt.Fprintln(out, "Legacy public-SSH Personal Server Configuration is no longer supported; recreate the Personal Server with Tailscale-only provisioning.")
+		return connectionState.validationError()
 	}
 	if connectionState != personalServerConnectionConfigAbsent {
 		return gate.clearIncompletePersonalServerConfiguration(ctx, out, appConfigPath, cfg, token, prompter, connectionState)
@@ -254,6 +261,8 @@ func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfigur
 	switch state {
 	case personalServerConnectionConfigMissingAddress:
 		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Personal Server address.")
+	case personalServerConnectionConfigMissingTailscaleHost:
+		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Tailscale Host.")
 	default:
 		fmt.Fprintln(out, "Personal Server Configuration is incomplete.")
 	}
@@ -305,9 +314,17 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx co
 		return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 	}
 
+	tailscaleHost := strings.TrimSpace(cfg.PersonalServer.TailscaleHost)
+	if _, found, err := gate.findPersonalServerTailscaleDevice(ctx, gate.tailscaleDeviceClient(cfg.Auth.Tailscale), tailscaleHost); err != nil {
+		return fmt.Errorf("verify Tailscale Host %q in saved tailnet: %w", tailscaleHost, err)
+	} else if !found {
+		return fmt.Errorf("Personal Server Configuration references Tailscale Host %q, but no matching Tailscale device exists in saved tailnet; repair the device manually or recreate the Personal Server", tailscaleHost)
+	}
+
 	fmt.Fprintf(out, "Personal Server already configured: server %d exists.\n", cfg.PersonalServer.ServerID)
-	fmt.Fprintf(out, "Saved addresses: %s\n", formatPersonalServerAddresses(cfg.PersonalServer.IPv4, cfg.PersonalServer.IPv6))
-	fmt.Fprintf(out, "Current addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
+	fmt.Fprintf(out, "Saved Tailscale Host: %s\n", tailscaleHost)
+	fmt.Fprintf(out, "Saved public IPv6 inventory: %s\n", displayPersonalServerAddress(cfg.PersonalServer.IPv6))
+	fmt.Fprintf(out, "Current Hetzner state: server %d exists (%s), public IPv6 %s.\n", server.ID, displayPersonalServerName(server.Name), displayPersonalServerAddress(server.IPv6))
 	return nil
 }
 
@@ -1721,14 +1738,18 @@ func (gate personalServerProvisioningGate) cloudClient(token string) personalSer
 	return newHcloudPersonalServerCloudClient(token, os.Getenv("HCLOUD_ENDPOINT"))
 }
 
-func formatPersonalServerAddresses(ipv4 string, ipv6 string) string {
-	return fmt.Sprintf("IPv4 %s, IPv6 %s", displayPersonalServerAddress(ipv4), displayPersonalServerAddress(ipv6))
-}
-
 func displayPersonalServerAddress(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "unavailable"
+	}
+	return value
+}
+
+func displayPersonalServerName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "name unavailable"
 	}
 	return value
 }

@@ -120,3 +120,14 @@
 - Added focused bootstrap renderer regression tests for OpenSSH socket disablement and generic-failure auth-key cleanup.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrap'` and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 9 as the next highest-priority remaining agent task because existing Tailscale Personal Server verification was the last AFK blocker before documentation and live validation.
+- Changed `myn configure` existing-server handling to classify saved Personal Server Configuration through the Tailscale-only connection state, require a saved server ID for reuse, verify the Hetzner server ID, and verify the saved Tailscale Host exists in the saved tailnet before skipping creation.
+- Updated skip output to report the saved server ID, Tailscale Host, saved public IPv6 inventory, and current Hetzner state without presenting public addresses as connection paths.
+- Made missing saved Tailscale devices fail with a manual repair or recreate message while preserving saved Personal Server Configuration.
+- Made legacy public-SSH Personal Server Configuration fail with the migration message without prompting to clear or recreate it automatically.
+- Added regression coverage for verified existing Tailscale servers, missing Tailscale devices, legacy public-SSH migration, incomplete Tailscale config, stale missing Hetzner server behavior, non-interactive behavior, and the Hetzner endpoint override.
+- Updated Issue 9 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

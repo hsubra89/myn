@@ -233,20 +233,22 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Update existing-server verification in `myn configure` for Tailscale-only Personal Server Configuration. A configured server should be considered reusable only when the Hetzner server exists and the matching Tailscale device exists. Missing Tailscale devices should fail without automated repair, while legacy public-SSH configs should fail with a migration message.
 
 ## Acceptance criteria
 
-- [ ] Existing complete Tailscale Personal Server Configuration verifies the saved Hetzner server ID before skipping creation.
-- [ ] Existing complete Tailscale Personal Server Configuration verifies the saved Tailscale Host exists in the saved tailnet.
-- [ ] Configure reports saved server ID, Tailscale Host, public IPv6 inventory, and current Hetzner state when skipping creation.
-- [ ] If the Hetzner server exists but the Tailscale device is missing, configure fails with a manual repair or recreate message.
-- [ ] If the saved server ID is missing in Hetzner, existing stale-config behavior remains explicit and non-destructive.
-- [ ] Legacy public-SSH configs without Tailscale Host fail with a clear migration message and are not auto-cleared.
-- [ ] `myn connect` and `myn sessions` do not perform Hetzner or Tailscale API verification before connecting.
-- [ ] Tests cover verified existing server, missing Tailscale device, missing Hetzner server, legacy config migration, incomplete Tailscale config, and non-interactive behavior.
+- [x] Existing complete Tailscale Personal Server Configuration verifies the saved Hetzner server ID before skipping creation.
+- [x] Existing complete Tailscale Personal Server Configuration verifies the saved Tailscale Host exists in the saved tailnet.
+- [x] Configure reports saved server ID, Tailscale Host, public IPv6 inventory, and current Hetzner state when skipping creation.
+- [x] If the Hetzner server exists but the Tailscale device is missing, configure fails with a manual repair or recreate message.
+- [x] If the saved server ID is missing in Hetzner, existing stale-config behavior remains explicit and non-destructive.
+- [x] Legacy public-SSH configs without Tailscale Host fail with a clear migration message and are not auto-cleared.
+- [x] `myn connect` and `myn sessions` do not perform Hetzner or Tailscale API verification before connecting.
+- [x] Tests cover verified existing server, missing Tailscale device, missing Hetzner server, legacy config migration, incomplete Tailscale config, and non-interactive behavior.
 
 ## Blocked by
 
