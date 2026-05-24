@@ -200,21 +200,22 @@ const (
 )
 
 type personalServerProvisioningGate struct {
-	newCloudClient     func(token string) personalServerCloudClient
-	saveConfig         func(path string, cfg appConfig) error
-	runSSH             personalServerSSHRunner
-	sleep              func(context.Context, time.Duration) error
-	bootstrapTimeout   time.Duration
-	sshPollInterval    time.Duration
-	userHomeDir        func() (string, error)
-	stat               func(string) (os.FileInfo, error)
-	readFile           func(string) ([]byte, error)
-	writeFile          func(string, []byte, os.FileMode) error
-	chmod              func(string, os.FileMode) error
-	sshPublicKey       func(string) (string, error)
-	currentUsername    func() string
-	gitConfigValue     func(scope personalServerGitConfigScope, key string) (string, bool)
-	passwordSaltReader io.Reader
+	newCloudClient          func(token string) personalServerCloudClient
+	newLocalTailscaleClient func() personalServerLocalTailscaleClient
+	saveConfig              func(path string, cfg appConfig) error
+	runSSH                  personalServerSSHRunner
+	sleep                   func(context.Context, time.Duration) error
+	bootstrapTimeout        time.Duration
+	sshPollInterval         time.Duration
+	userHomeDir             func() (string, error)
+	stat                    func(string) (os.FileInfo, error)
+	readFile                func(string) ([]byte, error)
+	writeFile               func(string, []byte, os.FileMode) error
+	chmod                   func(string, os.FileMode) error
+	sshPublicKey            func(string) (string, error)
+	currentUsername         func() string
+	gitConfigValue          func(scope personalServerGitConfigScope, key string) (string, bool)
+	passwordSaltReader      io.Reader
 }
 
 func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
@@ -239,13 +240,7 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 		return gate.clearIncompletePersonalServerConfiguration(ctx, out, appConfigPath, cfg, token, prompter, connectionState)
 	}
 
-	if !prompter.CanPrompt() {
-		fmt.Fprintln(out, "Personal Server creation skipped: configure is running non-interactively.")
-		return nil
-	}
-
-	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+	return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }
 
 func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfiguration(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter, state personalServerConnectionConfigState) error {
@@ -272,8 +267,7 @@ func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfigur
 		return err
 	}
 	fmt.Fprintln(out, "Cleared incomplete Personal Server Configuration.")
-	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+	return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }
 
 func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter) error {
@@ -301,8 +295,7 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx co
 			return err
 		}
 		fmt.Fprintln(out, "Cleared stale Personal Server Configuration.")
-		fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-		return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+		return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 	}
 
 	fmt.Fprintf(out, "Personal Server already configured: server %d exists.\n", cfg.PersonalServer.ServerID)
@@ -311,7 +304,26 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx co
 	return nil
 }
 
-func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
+func (gate personalServerProvisioningGate) preparePersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
+	if !prompter.CanPrompt() {
+		fmt.Fprintln(out, "Personal Server creation skipped: configure is running non-interactively.")
+		return nil
+	}
+	if !cfg.Auth.Tailscale.isConfigured() {
+		fmt.Fprintln(out, "Personal Server creation skipped: Tailscale Credentials are not configured. Run `myn auth tailscale` first.")
+		return nil
+	}
+
+	localStatus, err := gate.verifyLocalTailscaleForPersonalServerCreation(ctx, cfg.Auth.Tailscale)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
+	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter, localStatus)
+}
+
+func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter, localTailscale personalServerLocalTailscaleStatus) error {
 	client, ok := gate.cloudClient(token).(personalServerPreviewCloudClient)
 	if !ok {
 		return fmt.Errorf("Personal Server preview requires a Hetzner client that can list Locations, Server Types, and Pricing")
@@ -366,7 +378,7 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 		fmt.Fprintf(out, "Selected Personal Server Location: %s\n", locationChoice.Location.Name)
 		fmt.Fprintf(out, "Selected Server Type: %s\n", serverTypeChoice.ServerType.Name)
 
-		inputs, err := gate.collectPersonalServerCreationInputs(prompter)
+		inputs, err := gate.collectPersonalServerCreationInputs(prompter, localTailscale.Identity)
 		if err != nil {
 			return err
 		}
@@ -948,8 +960,11 @@ func (gate personalServerProvisioningGate) loadPersonalServerSSHIdentity(identit
 	return candidate, nil
 }
 
-func (gate personalServerProvisioningGate) collectPersonalServerCreationInputs(prompter configurePrompter) (personalServerCreationInputs, error) {
-	defaultUser := normalizePersonalServerUser(gate.personalServerCurrentUsername())
+func (gate personalServerProvisioningGate) collectPersonalServerCreationInputs(prompter configurePrompter, defaultIdentity string) (personalServerCreationInputs, error) {
+	if strings.TrimSpace(defaultIdentity) == "" {
+		defaultIdentity = gate.personalServerCurrentUsername()
+	}
+	defaultUser := normalizePersonalServerUser(defaultIdentity)
 	user, err := prompter.Input("Personal Server User", defaultUser, validatePersonalServerUser)
 	if err != nil {
 		return personalServerCreationInputs{}, err

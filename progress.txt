@@ -17,3 +17,13 @@
 - Added tests for successful save, env-driven auth, API validation request shape, invalid token failure, insufficient capability failure, tailnet inference, ambiguous tailnet prompting, browser fallback, output secret non-leakage, and config file permissions.
 - Updated Issue 1 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 3 as the next highest-priority task because configure-time LocalAPI preflight is the first unfinished prerequisite for Tailnet Policy planning and the rest of Tailscale-only provisioning.
+- Added a Tailscale LocalAPI boundary for Personal Server creation preflight using the official `tailscale.com/client/local` client and `StatusWithoutPeers`.
+- Updated `myn configure` Personal Server creation to require saved Tailscale Credentials, verify the local daemon is running, connected, readable, and on the saved tailnet before Hetzner preview or creation work.
+- Changed the Personal Server User default to derive from the current LocalAPI Tailscale identity while preserving editable, validated prompts.
+- Added tests for missing Tailscale Credentials, LocalAPI unavailable, disconnected daemon, tailnet mismatch, LocalAPI status mapping, and identity-derived editable defaults.
+- Updated Issue 3 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

@@ -21,9 +21,7 @@ func TestRunConfigureReportsExistingPersonalServer(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			User:     "harish",
@@ -44,6 +42,7 @@ func TestRunConfigureReportsExistingPersonalServer(t *testing.T) {
 		},
 	}
 	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 		newCloudClient: func(token string) personalServerCloudClient {
 			if token != "existing-token" {
 				t.Fatalf("token mismatch: %q", token)
@@ -98,9 +97,7 @@ func TestRunConfigureClearsStalePersonalServerConfigurationWhenInteractive(t *te
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			User:     "harish",
@@ -121,6 +118,7 @@ func TestRunConfigureClearsStalePersonalServerConfigurationWhenInteractive(t *te
 		pricing: fakePersonalServerPricing("ipv4", "ash", "0.60"),
 	}
 	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 		newCloudClient: func(string) personalServerCloudClient {
 			return cloud
 		},
@@ -186,9 +184,7 @@ func TestRunConfigureFailsForStalePersonalServerConfigurationWhenNonInteractive(
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			User:     "harish",
@@ -217,6 +213,7 @@ func TestRunConfigureFailsForStalePersonalServerConfigurationWhenNonInteractive(
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     &fakeConfigurePrompter{canPrompt: false},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return &fakePersonalServerCloudClient{}
 			},
@@ -247,9 +244,7 @@ func TestRunConfigureClearsIncompletePersonalServerConfigurationWhenInteractive(
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			IPv4:     "203.0.113.10",
@@ -287,6 +282,7 @@ func TestRunConfigureClearsIncompletePersonalServerConfigurationWhenInteractive(
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -331,9 +327,7 @@ func TestRunConfigureFailsForIncompletePersonalServerConfigurationWhenNonInterac
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			IPv4:     "203.0.113.10",
@@ -361,6 +355,7 @@ func TestRunConfigureFailsForIncompletePersonalServerConfigurationWhenNonInterac
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     &fakeConfigurePrompter{canPrompt: false},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -388,7 +383,7 @@ func TestRunConfigureFailsForIncompletePersonalServerConfigurationWhenNonInterac
 	}
 }
 
-func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *testing.T) {
+func TestRunConfigureSkipsPersonalServerWhenTailscaleCredentialsMissing(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -397,6 +392,217 @@ func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *
 		Auth: authConfig{
 			Hetzner: hetznerConfig{Token: "existing-token"},
 		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if cloud.listLocations != 0 {
+		t.Fatalf("Hetzner preview should not run without Tailscale Credentials, listed Locations %d times", cloud.listLocations)
+	}
+	if !strings.Contains(out.String(), "Personal Server creation skipped: Tailscale Credentials are not configured. Run `myn auth tailscale` first.") {
+		t.Fatalf("expected missing Tailscale Credentials skip, got %q", out.String())
+	}
+}
+
+func TestRunConfigureFailsWhenLocalTailscaleDaemonUnavailable(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
+				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
+					return personalServerLocalTailscaleStatus{}, errors.New("localapi socket denied")
+				})
+			},
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected LocalAPI error")
+	}
+	if !strings.Contains(err.Error(), "local Tailscale daemon is unavailable or unreadable: localapi socket denied") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cloud.listLocations != 0 {
+		t.Fatalf("Hetzner preview should not run when LocalAPI is unavailable, listed Locations %d times", cloud.listLocations)
+	}
+}
+
+func TestRunConfigureFailsWhenLocalTailscaleDaemonDisconnected(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
+				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
+					return personalServerLocalTailscaleStatus{
+						BackendState: "NeedsLogin",
+						TailnetName:  "tailnet-123",
+						Identity:     "harish@example.test",
+					}, nil
+				})
+			},
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected disconnected LocalAPI error")
+	}
+	if !strings.Contains(err.Error(), "local Tailscale daemon is not connected (state: NeedsLogin)") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cloud.listLocations != 0 {
+		t.Fatalf("Hetzner preview should not run when LocalAPI is disconnected, listed Locations %d times", cloud.listLocations)
+	}
+}
+
+func TestRunConfigureFailsWhenLocalTailnetMismatchesSavedCredentials(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
+				return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
+					return personalServerLocalTailscaleStatus{
+						BackendState: tailscaleBackendStateRunning,
+						TailnetName:  "other-tailnet",
+						Identity:     "harish@example.test",
+					}, nil
+				})
+			},
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected tailnet mismatch error")
+	}
+	if !strings.Contains(err.Error(), `local Tailscale daemon is connected to tailnet "other-tailnet", but saved Tailscale Credentials use "tailnet-123"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cloud.listLocations != 0 {
+		t.Fatalf("Hetzner preview should not run on tailnet mismatch, listed Locations %d times", cloud.listLocations)
+	}
+}
+
+func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -438,6 +644,7 @@ func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *
 			passwords: []string{"server-secret", "server-secret"},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -460,9 +667,7 @@ func TestRunConfigurePreviewsLocationAndEligibleServerTypes(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -506,6 +711,7 @@ func TestRunConfigurePreviewsLocationAndEligibleServerTypes(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(token string) personalServerCloudClient {
 				if token != "existing-token" {
 					t.Fatalf("token mismatch: %q", token)
@@ -574,9 +780,7 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -592,11 +796,14 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 	}
 	var gitConfigCalls []string
 	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: func() personalServerLocalTailscaleClient {
+			return testPersonalServerLocalTailscaleClientWithIdentity(`ACME\Harish Subra`)
+		},
 		newCloudClient: func(string) personalServerCloudClient {
 			return cloud
 		},
 		currentUsername: func() string {
-			return `ACME\Harish Subra`
+			return "os-user"
 		},
 		gitConfigValue: func(scope personalServerGitConfigScope, key string) (string, bool) {
 			gitConfigCalls = append(gitConfigCalls, string(scope)+":"+key)
@@ -716,9 +923,7 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -763,6 +968,7 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -792,9 +998,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -818,6 +1022,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	}
 	var savedAfterWait bool
 	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 		newCloudClient: func(token string) personalServerCloudClient {
 			if token != "existing-token" {
 				t.Fatalf("token mismatch: %q", token)
@@ -948,9 +1153,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1010,6 +1213,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1070,9 +1274,7 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1112,6 +1314,7 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return successfulPersonalServerCloudClient()
 			},
@@ -1148,9 +1351,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1193,6 +1394,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1231,9 +1433,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1268,6 +1468,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return successfulPersonalServerCloudClient()
 			},
@@ -1318,9 +1519,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1352,6 +1551,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return successfulPersonalServerCloudClient()
 			},
@@ -1404,9 +1604,7 @@ func TestRunConfigureCancellationBeforeServerCreationDoesNotSavePersonalServer(t
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1435,6 +1633,7 @@ func TestRunConfigureCancellationBeforeServerCreationDoesNotSavePersonalServer(t
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     &fakeConfigurePrompter{canPrompt: true},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1465,9 +1664,7 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1501,6 +1698,7 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1537,9 +1735,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1571,6 +1767,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return successfulPersonalServerCloudClient()
 			},
@@ -1609,9 +1806,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1643,6 +1838,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 			confirms:  []bool{true},
 		},
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return successfulPersonalServerCloudClient()
 			},
@@ -1684,9 +1880,7 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1725,6 +1919,7 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1760,9 +1955,7 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1803,6 +1996,7 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1831,9 +2025,7 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -1896,6 +2088,7 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -1933,6 +2126,7 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 
 func TestCollectPersonalServerCreationInputsPromptsWhenUsernameCannotNormalize(t *testing.T) {
 	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 		currentUsername: func() string {
 			return "!!!"
 		},
@@ -1946,7 +2140,7 @@ func TestCollectPersonalServerCreationInputsPromptsWhenUsernameCannotNormalize(t
 		passwords: []string{"server-secret", "server-secret"},
 	}
 
-	inputs, err := gate.collectPersonalServerCreationInputs(prompter)
+	inputs, err := gate.collectPersonalServerCreationInputs(prompter, "!!!")
 	if err != nil {
 		t.Fatalf("collect inputs: %v", err)
 	}
@@ -2097,9 +2291,7 @@ func TestRunConfigureLocationFallbackDefaultIsFirstSortedCode(t *testing.T) {
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -2137,6 +2329,7 @@ func TestRunConfigureLocationFallbackDefaultIsFirstSortedCode(t *testing.T) {
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -2162,9 +2355,7 @@ func TestRunConfigureReturnsToLocationSelectionWhenNoServerTypesAreEligible(t *t
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -2202,6 +2393,7 @@ func TestRunConfigureReturnsToLocationSelectionWhenNoServerTypesAreEligible(t *t
 		sshPublicKey: testSSHPublicKeyFunc(identity),
 		prompter:     prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
@@ -2230,9 +2422,7 @@ func TestRunConfigureVerifiesPersonalServerWithHetznerEndpointOverride(t *testin
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	if err := saveAppConfig(configPath, appConfig{
-		Auth: authConfig{
-			Hetzner: hetznerConfig{Token: "existing-token"},
-		},
+		Auth: testPersonalServerAuthConfig(),
 		PersonalServer: personalServerConfig{
 			ServerID: 123456,
 			User:     "harish",
@@ -2343,6 +2533,30 @@ func successfulPersonalServerCloudClient() *fakePersonalServerCloudClient {
 			IPv6: "2001:db8::55",
 		},
 	}
+}
+
+func testPersonalServerAuthConfig() authConfig {
+	return authConfig{
+		Hetzner: hetznerConfig{Token: "existing-token"},
+		Tailscale: tailscaleConfig{
+			Token:   "tailscale-token",
+			Tailnet: "tailnet-123",
+		},
+	}
+}
+
+func testPersonalServerLocalTailscaleClient() personalServerLocalTailscaleClient {
+	return testPersonalServerLocalTailscaleClientWithIdentity("harish")
+}
+
+func testPersonalServerLocalTailscaleClientWithIdentity(identity string) personalServerLocalTailscaleClient {
+	return personalServerLocalTailscaleClientFunc(func(context.Context) (personalServerLocalTailscaleStatus, error) {
+		return personalServerLocalTailscaleStatus{
+			BackendState: tailscaleBackendStateRunning,
+			TailnetName:  "tailnet-123",
+			Identity:     identity,
+		}, nil
+	})
 }
 
 type personalServerSSHCall struct {

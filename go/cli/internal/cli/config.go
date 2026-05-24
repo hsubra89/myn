@@ -100,6 +100,10 @@ func (cfg tailscaleConfig) isZero() bool {
 	return cfg.Token == "" && cfg.Tailnet == ""
 }
 
+func (cfg tailscaleConfig) isConfigured() bool {
+	return strings.TrimSpace(cfg.Token) != "" && strings.TrimSpace(cfg.Tailnet) != ""
+}
+
 func (cfg projectsConfig) isZero() bool {
 	return cfg.LocalRoot == "" && cfg.RemoteRoot == ""
 }

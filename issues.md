@@ -61,19 +61,21 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Before Personal Server creation, `myn configure` should verify the local Tailscale daemon is running and connected to the saved tailnet through Tailscale LocalAPI. The local `tailscale` CLI must not be required. The current Tailscale identity should become the default Personal Server User after Linux-safe normalization, while remaining editable.
 
 ## Acceptance criteria
 
-- [ ] `myn configure` uses Tailscale LocalAPI, not shelling out to the `tailscale` CLI, for local daemon status.
-- [ ] Configure fails before cloud resource creation when the local daemon is unavailable, disconnected, or unreadable.
-- [ ] Configure fails before cloud resource creation when the active local tailnet does not match saved Tailscale Credentials.
-- [ ] The Personal Server User default is derived from the current Tailscale identity and normalized with the existing Linux username rules.
-- [ ] The Personal Server User prompt remains editable and validated.
-- [ ] Configure skips Personal Server creation with a clear message when Tailscale Credentials are missing.
-- [ ] Tests cover daemon unavailable, disconnected, tailnet mismatch, successful identity-derived default, and editable override.
+- [x] `myn configure` uses Tailscale LocalAPI, not shelling out to the `tailscale` CLI, for local daemon status.
+- [x] Configure fails before cloud resource creation when the local daemon is unavailable, disconnected, or unreadable.
+- [x] Configure fails before cloud resource creation when the active local tailnet does not match saved Tailscale Credentials.
+- [x] The Personal Server User default is derived from the current Tailscale identity and normalized with the existing Linux username rules.
+- [x] The Personal Server User prompt remains editable and validated.
+- [x] Configure skips Personal Server creation with a clear message when Tailscale Credentials are missing.
+- [x] Tests cover daemon unavailable, disconnected, tailnet mismatch, successful identity-derived default, and editable override.
 
 ## Blocked by
 
