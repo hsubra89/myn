@@ -202,26 +202,28 @@ const (
 )
 
 type personalServerProvisioningGate struct {
-	newCloudClient          func(token string) personalServerCloudClient
-	newLocalTailscaleClient func() personalServerLocalTailscaleClient
-	newTailscaleCloudClient func(tailscaleConfig) personalServerTailscaleCloudClient
-	newTailnetPolicyClient  func(tailscaleConfig) personalServerTailnetPolicyClient
-	tailnetPolicyEnabled    bool
-	openURL                 func(string) error
-	saveConfig              func(path string, cfg appConfig) error
-	runSSH                  personalServerSSHRunner
-	sleep                   func(context.Context, time.Duration) error
-	bootstrapTimeout        time.Duration
-	sshPollInterval         time.Duration
-	userHomeDir             func() (string, error)
-	stat                    func(string) (os.FileInfo, error)
-	readFile                func(string) ([]byte, error)
-	writeFile               func(string, []byte, os.FileMode) error
-	chmod                   func(string, os.FileMode) error
-	sshPublicKey            func(string) (string, error)
-	currentUsername         func() string
-	gitConfigValue          func(scope personalServerGitConfigScope, key string) (string, bool)
-	passwordSaltReader      io.Reader
+	newCloudClient                   func(token string) personalServerCloudClient
+	newLocalTailscaleClient          func() personalServerLocalTailscaleClient
+	newTailscaleCloudClient          func(tailscaleConfig) personalServerTailscaleCloudClient
+	newTailnetPolicyClient           func(tailscaleConfig) personalServerTailnetPolicyClient
+	newTailscaleMachineAuthKeyClient func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient
+	tailnetPolicyEnabled             bool
+	openURL                          func(string) error
+	saveConfig                       func(path string, cfg appConfig) error
+	renderBootstrap                  func(personalServerBootstrapInput) (string, error)
+	runSSH                           personalServerSSHRunner
+	sleep                            func(context.Context, time.Duration) error
+	bootstrapTimeout                 time.Duration
+	sshPollInterval                  time.Duration
+	userHomeDir                      func() (string, error)
+	stat                             func(string) (os.FileInfo, error)
+	readFile                         func(string) ([]byte, error)
+	writeFile                        func(string, []byte, os.FileMode) error
+	chmod                            func(string, os.FileMode) error
+	sshPublicKey                     func(string) (string, error)
+	currentUsername                  func() string
+	gitConfigValue                   func(scope personalServerGitConfigScope, key string) (string, bool)
+	passwordSaltReader               io.Reader
 }
 
 func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
@@ -458,19 +460,25 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return err
 	}
 
-	userData, err := renderPersonalServerBootstrapCloudInit(personalServerBootstrapInput{
-		User:              plan.User,
-		PasswordHash:      plan.PasswordHash,
-		SSHPublicKey:      identity.PublicKey.Line(),
-		RemoteProjectRoot: plan.RemoteProjectRoot,
-		GitIdentity:       plan.GitIdentity,
-		ToolPlan:          defaultPersonalServerBootstrapToolPlan(),
-	})
+	image, err := latestPersonalServerUbuntuImage(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	image, err := latestPersonalServerUbuntuImage(ctx, client)
+	machineAuthKey, err := gate.createPersonalServerTailscaleMachineAuthKey(ctx, cfg.Auth.Tailscale)
+	if err != nil {
+		return err
+	}
+
+	userData, err := gate.renderPersonalServerBootstrap(personalServerBootstrapInput{
+		User:                    plan.User,
+		PasswordHash:            plan.PasswordHash,
+		SSHPublicKey:            identity.PublicKey.Line(),
+		TailscaleMachineAuthKey: machineAuthKey.Key,
+		RemoteProjectRoot:       plan.RemoteProjectRoot,
+		GitIdentity:             plan.GitIdentity,
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
 	if err != nil {
 		return err
 	}
@@ -532,6 +540,13 @@ func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPat
 		IPv6:     server.IPv6,
 	}
 	return gate.writeConfig(appConfigPath, cfg)
+}
+
+func (gate personalServerProvisioningGate) renderPersonalServerBootstrap(input personalServerBootstrapInput) (string, error) {
+	if gate.renderBootstrap != nil {
+		return gate.renderBootstrap(input)
+	}
+	return renderPersonalServerBootstrapCloudInit(input)
 }
 
 const (

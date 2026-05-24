@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"tailscale.com/client/local"
 	tailscale "tailscale.com/client/tailscale/v2"
 	"tailscale.com/ipn/ipnstate"
 )
 
-const tailscaleBackendStateRunning = "Running"
+const (
+	tailscaleBackendStateRunning                     = "Running"
+	personalServerTailscaleMachineAuthKeyLifetime    = 10 * time.Minute
+	personalServerTailscaleMachineAuthKeyDescription = "Myn Personal Server provisioning"
+)
 
 type personalServerLocalTailscaleClient interface {
 	Status(ctx context.Context) (personalServerLocalTailscaleStatus, error)
@@ -39,6 +44,19 @@ type personalServerTailscaleCloudClientFunc func(context.Context, string) (bool,
 
 func (fn personalServerTailscaleCloudClientFunc) TailnetContainsNodeID(ctx context.Context, nodeID string) (bool, error) {
 	return fn(ctx, nodeID)
+}
+
+type personalServerTailscaleMachineAuthKey struct {
+	Key string
+}
+
+type personalServerTailscaleMachineAuthKeyInput struct {
+	Tag      string
+	Lifetime time.Duration
+}
+
+type personalServerTailscaleMachineAuthKeyClient interface {
+	CreateMachineAuthKey(ctx context.Context, input personalServerTailscaleMachineAuthKeyInput) (personalServerTailscaleMachineAuthKey, error)
 }
 
 type personalServerLocalAPIClient struct {
@@ -157,6 +175,51 @@ func (client personalServerTailscaleAPIClient) ApplyPolicy(ctx context.Context, 
 	return nil
 }
 
+func (client personalServerTailscaleAPIClient) CreateMachineAuthKey(ctx context.Context, input personalServerTailscaleMachineAuthKeyInput) (personalServerTailscaleMachineAuthKey, error) {
+	cloudClient := client.client
+	if cloudClient == nil {
+		return personalServerTailscaleMachineAuthKey{}, fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	tag := strings.TrimSpace(input.Tag)
+	if tag == "" {
+		tag = personalServerTailscaleTag
+	}
+	lifetime := input.Lifetime
+	if lifetime <= 0 {
+		lifetime = personalServerTailscaleMachineAuthKeyLifetime
+	}
+
+	capabilities := tailscale.KeyCapabilities{}
+	capabilities.Devices.Create.Reusable = false
+	capabilities.Devices.Create.Ephemeral = false
+	capabilities.Devices.Create.Preauthorized = true
+	capabilities.Devices.Create.Tags = []string{tag}
+
+	key, err := cloudClient.Keys().CreateAuthKey(ctx, tailscale.CreateKeyRequest{
+		Capabilities:  capabilities,
+		ExpirySeconds: int64(lifetime.Seconds()),
+		Description:   personalServerTailscaleMachineAuthKeyDescription,
+	})
+	if err != nil {
+		return personalServerTailscaleMachineAuthKey{}, mapTailscaleValidationError(ctx, "Tailscale Machine Auth Key creation", err)
+	}
+	if key == nil || strings.TrimSpace(key.Key) == "" {
+		return personalServerTailscaleMachineAuthKey{}, fmt.Errorf("Tailscale Machine Auth Key creation returned no key material")
+	}
+	return personalServerTailscaleMachineAuthKey{Key: strings.TrimSpace(key.Key)}, nil
+}
+
+func (gate personalServerProvisioningGate) createPersonalServerTailscaleMachineAuthKey(ctx context.Context, cfg tailscaleConfig) (personalServerTailscaleMachineAuthKey, error) {
+	key, err := gate.tailscaleMachineAuthKeyClient(cfg).CreateMachineAuthKey(ctx, personalServerTailscaleMachineAuthKeyInput{
+		Tag:      personalServerTailscaleTag,
+		Lifetime: personalServerTailscaleMachineAuthKeyLifetime,
+	})
+	if err != nil {
+		return personalServerTailscaleMachineAuthKey{}, fmt.Errorf("create Tailscale Machine Auth Key: %w", err)
+	}
+	return key, nil
+}
+
 func (gate personalServerProvisioningGate) verifyLocalTailscaleForPersonalServerCreation(ctx context.Context, cfg tailscaleConfig) (personalServerLocalTailscaleStatus, error) {
 	status, err := gate.localTailscaleClient().Status(ctx)
 	if err != nil {
@@ -215,6 +278,26 @@ func (gate personalServerProvisioningGate) tailscaleCloudClient(cfg tailscaleCon
 		})
 	}
 	return personalServerTailscaleAPIClient{client: client}
+}
+
+func (gate personalServerProvisioningGate) tailscaleMachineAuthKeyClient(cfg tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
+	if gate.newTailscaleMachineAuthKeyClient != nil {
+		return gate.newTailscaleMachineAuthKeyClient(cfg)
+	}
+	if cloudClient := gate.tailscaleCloudClient(cfg); cloudClient != nil {
+		if authKeyClient, ok := cloudClient.(personalServerTailscaleMachineAuthKeyClient); ok {
+			return authKeyClient
+		}
+	}
+	return personalServerTailscaleMachineAuthKeyErrorClient{err: fmt.Errorf("Tailscale cloud client cannot create Machine Auth Keys")}
+}
+
+type personalServerTailscaleMachineAuthKeyErrorClient struct {
+	err error
+}
+
+func (client personalServerTailscaleMachineAuthKeyErrorClient) CreateMachineAuthKey(context.Context, personalServerTailscaleMachineAuthKeyInput) (personalServerTailscaleMachineAuthKey, error) {
+	return personalServerTailscaleMachineAuthKey{}, client.err
 }
 
 func personalServerTailnetNamesMatch(savedTailnet string, status personalServerLocalTailscaleStatus) bool {

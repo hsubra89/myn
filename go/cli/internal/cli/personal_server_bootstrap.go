@@ -18,12 +18,13 @@ const (
 var personalServerTmuxProfile string
 
 type personalServerBootstrapInput struct {
-	User              string
-	PasswordHash      string
-	SSHPublicKey      string
-	RemoteProjectRoot string
-	GitIdentity       personalServerGitIdentity
-	ToolPlan          personalServerBootstrapToolPlan
+	User                    string
+	PasswordHash            string
+	SSHPublicKey            string
+	TailscaleMachineAuthKey string
+	RemoteProjectRoot       string
+	GitIdentity             personalServerGitIdentity
+	ToolPlan                personalServerBootstrapToolPlan
 }
 
 type personalServerBootstrapToolPlan struct {

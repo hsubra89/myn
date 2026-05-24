@@ -47,3 +47,14 @@
 - Added tests for no-op policy, missing tag owner, missing grant, missing SSH rule, combined changes, validation failure, apply conflict, and declined policy edits.
 - Updated Issue 4 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 5 as the next highest-priority unblocked task because one-off Tailscale Machine Auth Key creation is the prerequisite for Tailscale-first bootstrap rendering and later configure orchestration.
+- Added a Tailscale Machine Auth Key client boundary backed by the official Tailscale API client.
+- Updated `myn configure` Personal Server creation to create a fresh one-off, tagged `tag:myn-personal-server`, pre-approved, non-ephemeral auth key with a ten-minute expiry after final confirmation and Tailnet Policy apply.
+- Passed the Machine Auth Key into the Personal Server Bootstrap renderer input while keeping it out of saved config and command output.
+- Kept auth-key failures before Hetzner resource creation, and did not add any revoke path after successful join.
+- Added tests for the Tailscale auth-key request shape, policy/key/cloud ordering, bootstrap renderer handoff, no config/stdout leakage, and create-key failure before cloud resources.
+- Updated Issue 5 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

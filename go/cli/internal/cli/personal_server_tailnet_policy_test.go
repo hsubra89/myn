@@ -365,6 +365,8 @@ type fakePersonalServerTailnetPolicyClient struct {
 	appliedPolicies   []string
 	appliedETags      []string
 	applyErr          error
+	events            *[]string
+	applyEvent        string
 }
 
 func (c *fakePersonalServerTailnetPolicyClient) ReadPolicy(context.Context) (personalServerTailnetPolicy, error) {
@@ -380,6 +382,13 @@ func (c *fakePersonalServerTailnetPolicyClient) ValidatePolicy(_ context.Context
 func (c *fakePersonalServerTailnetPolicyClient) ApplyPolicy(_ context.Context, rawHuJSON string, etag string) error {
 	c.appliedPolicies = append(c.appliedPolicies, rawHuJSON)
 	c.appliedETags = append(c.appliedETags, etag)
+	if c.events != nil {
+		event := c.applyEvent
+		if event == "" {
+			event = "policy.apply"
+		}
+		*c.events = append(*c.events, event)
+	}
 	return c.applyErr
 }
 

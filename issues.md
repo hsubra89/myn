@@ -117,19 +117,21 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 After Tailnet Policy is confirmed and applied, `myn configure` should create a fresh one-off Tailscale Machine Auth Key for the new Personal Server. The key should be tagged, pre-approved, non-ephemeral, expire after ten minutes, be created immediately before the Hetzner create request, and never be saved or printed.
 
 ## Acceptance criteria
 
-- [ ] Configure creates a new auth key for each Personal Server creation attempt.
-- [ ] The key is one-off, tagged with `tag:myn-personal-server`, pre-approved, non-ephemeral, and expires after ten minutes.
-- [ ] The key is created only after final confirmation and required Tailnet Policy changes are applied.
-- [ ] The key is created immediately before rendering cloud-init and creating the Hetzner server.
-- [ ] The key is passed into bootstrap rendering but never saved to config or printed to command output.
-- [ ] Configure does not attempt to revoke the key after successful join.
-- [ ] Tests cover key request shape, ordering relative to policy and server creation, no persistence, no output leakage, and create-key failure before cloud resources.
+- [x] Configure creates a new auth key for each Personal Server creation attempt.
+- [x] The key is one-off, tagged with `tag:myn-personal-server`, pre-approved, non-ephemeral, and expires after ten minutes.
+- [x] The key is created only after final confirmation and required Tailnet Policy changes are applied.
+- [x] The key is created immediately before rendering cloud-init and creating the Hetzner server.
+- [x] The key is passed into bootstrap rendering but never saved to config or printed to command output.
+- [x] Configure does not attempt to revoke the key after successful join.
+- [x] Tests cover key request shape, ordering relative to policy and server creation, no persistence, no output leakage, and create-key failure before cloud resources.
 
 ## Blocked by
 
