@@ -262,7 +262,7 @@ Type: HITL
 
 Suggested label: `ready-for-human`
 
-Status: Ready for Human (docs and gated live harness updated; live validation pending)
+Status: Ready for Human (docs and gated live harness updated; live validation pending; latest enabled gate is blocked on missing `TAILSCALE_API_TOKEN` in `.env.local`)
 
 ## What to build
 

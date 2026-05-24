@@ -195,3 +195,10 @@
 - Added focused regression coverage for stdout-only marker SSH output, live-validation SSH output capture, stderr diagnostics on SSH failure, and broad overlapping Tailscale SSH policy rejection.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with focused regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 10 as the only remaining task because all AFK implementation issues are done and the unchecked acceptance criteria are the human-run billable live validation checks.
+- Ran the normal feedback loop with `go test ./...` from `go/cli`; it passed.
+- Ran the enabled live validation gate with `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v`; it failed before provisioning because `.env.local` is missing `TAILSCALE_API_TOKEN`.
+- Updated Issue 10 status to record the current human prerequisite block; no billable Hetzner server was created and no product code changed.
