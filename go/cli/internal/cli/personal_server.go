@@ -877,7 +877,6 @@ func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner
 
 func defaultPersonalServerSSHRunner(ctx context.Context, user string, host string, command string) (string, error) {
 	options := []string{
-		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
 	}

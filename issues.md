@@ -457,3 +457,26 @@ Move one-off Tailscale Machine Auth Key creation later in `myn configure` so all
 
 - Issue 5: Create one-off Tailscale Machine Auth Keys for provisioning
 - Issue 7: Provision IPv6-only Hetzner servers with no public ingress
+
+## Issue 18: Remove BatchMode from fallback Personal Server SSH runner
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Remove the remaining `BatchMode=yes` option from the fallback Personal Server SSH runner. Even though the main provisioning path now uses the check-aware Tailscale SSH runner, any fallback SSH execution for Personal Server bootstrap polling must keep Tailscale SSH check prompts usable instead of forcing non-interactive SSH behavior from the old public-SSH model.
+
+## Acceptance criteria
+
+- [x] The fallback Personal Server SSH runner does not pass `BatchMode=yes`.
+- [x] The runner still uses ordinary `ssh` with `StrictHostKeyChecking=accept-new` and the existing connect timeout.
+- [x] The runner still returns stdout only on success and includes stderr diagnostics on failure.
+- [x] Tests cover the no-`BatchMode` command shape.
+
+## Blocked by
+
+- Issue 14: Remove identity-file branch from Personal Server SSH runner

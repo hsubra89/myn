@@ -2038,6 +2038,30 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 
 func TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout(t *testing.T) {
 	prependFakeSSHToPath(t, `#!/bin/sh
+strict_host_key_checking=
+connect_timeout=
+for arg in "$@"; do
+	case "$arg" in
+		BatchMode=yes)
+			printf '%s\n' 'unexpected BatchMode option' >&2
+			exit 31
+			;;
+		StrictHostKeyChecking=accept-new)
+			strict_host_key_checking=1
+			;;
+		ConnectTimeout=10)
+			connect_timeout=1
+			;;
+	esac
+done
+if [ "$strict_host_key_checking" != 1 ]; then
+	printf '%s\n' 'missing StrictHostKeyChecking=accept-new' >&2
+	exit 32
+fi
+if [ "$connect_timeout" != 1 ]; then
+	printf '%s\n' 'missing ConnectTimeout=10' >&2
+	exit 33
+fi
 printf '%s\n' '{"status":"success","timestamp":"2026-05-10T12:00:00Z"}'
 printf '%s\n' 'Tailscale SSH check prompt belongs on stderr' >&2
 `)

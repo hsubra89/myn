@@ -239,3 +239,11 @@
 - Updated auth-key failure coverage to reflect the new boundary: a key failure can now happen after reusable firewall readiness, but still stops before cloud-init rendering, server creation, and Personal Server Configuration save.
 - Updated Issue 17 status and acceptance criteria in `issues.md`.
 - Verified with focused Machine Auth Key/firewall ordering tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 18 as the next highest-priority agent-owned task after finding a remaining `BatchMode=yes` fallback in the Personal Server SSH runner, while Issue 10 remains blocked on human live-validation credentials.
+- Added Issue 18 to track removing the fallback non-interactive SSH behavior from Personal Server bootstrap polling support.
+- Used a focused TDD slice to first make `TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout` fail when `BatchMode=yes` is present, then removed the option while preserving ordinary `ssh`, `StrictHostKeyChecking=accept-new`, `ConnectTimeout=10`, stdout-only success output, and stderr diagnostics on failure.
+- Updated Issue 18 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./internal/cli -run TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.
