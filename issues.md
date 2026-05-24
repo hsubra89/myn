@@ -1,8 +1,3 @@
-# Review notes
-
-- `go/cli/internal/cli/personal_server_tailscale.go:106`: LocalAPI preflight compares the saved API tailnet ID only with LocalAPI-visible tailnet names, so valid tailnets can be rejected when the API identifier differs from display or DNS names. Compare against an API-resolved identifier or persist a LocalAPI-comparable name.
-- `go/cli/internal/cli/auth.go:459`: Interactive Tailscale auth suppresses the printed Keys URL when `xdg-open`/`open` starts but later exits non-zero. Detect opener failure before skipping the URL fallback.
-
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.

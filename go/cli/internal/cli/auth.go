@@ -443,9 +443,15 @@ func firstNonEmpty(values ...string) string {
 }
 
 func openBrowserURL(rawURL string) error {
+	return runBrowserOpener(rawURL, runtime.GOOS, exec.Command)
+}
+
+type browserCommandFunc func(string, ...string) *exec.Cmd
+
+func runBrowserOpener(rawURL string, goos string, commandFunc browserCommandFunc) error {
 	var command string
 	var args []string
-	switch runtime.GOOS {
+	switch goos {
 	case "darwin":
 		command = "open"
 		args = []string{rawURL}
@@ -456,7 +462,7 @@ func openBrowserURL(rawURL string) error {
 		command = "xdg-open"
 		args = []string{rawURL}
 	}
-	return exec.Command(command, args...).Start()
+	return commandFunc(command, args...).Run()
 }
 
 func reportExistingTokenFailure(out io.Writer, err error) {

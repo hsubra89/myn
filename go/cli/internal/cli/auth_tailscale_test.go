@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -330,6 +331,35 @@ func TestAuthTailscaleInteractiveBrowserFallbackPrintsKeysURL(t *testing.T) {
 		t.Fatal("prompted Tailscale API token was printed")
 	}
 	assertSavedTailscaleCredentials(t, configPath, "prompt-token", "tailnet-123")
+}
+
+func TestOpenBrowserURLReportsStartedOpenerFailure(t *testing.T) {
+	var gotCommand string
+	var gotArgs []string
+
+	err := runBrowserOpener(tailscaleKeysURL, "linux", func(command string, args ...string) *exec.Cmd {
+		gotCommand = command
+		gotArgs = slices.Clone(args)
+		cmd := exec.Command(os.Args[0], "-test.run=TestBrowserOpenerHelperProcess")
+		cmd.Env = append(os.Environ(), "MYN_BROWSER_OPENER_HELPER=exit")
+		return cmd
+	})
+	if err == nil {
+		t.Fatal("expected opener exit failure")
+	}
+	if gotCommand != "xdg-open" {
+		t.Fatalf("browser opener command mismatch: %q", gotCommand)
+	}
+	if !slices.Equal(gotArgs, []string{tailscaleKeysURL}) {
+		t.Fatalf("browser opener args mismatch: %#v", gotArgs)
+	}
+}
+
+func TestBrowserOpenerHelperProcess(t *testing.T) {
+	if os.Getenv("MYN_BROWSER_OPENER_HELPER") != "exit" {
+		return
+	}
+	os.Exit(7)
 }
 
 type fakeTailscalePrompter struct {

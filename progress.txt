@@ -27,3 +27,12 @@
 - Added tests for missing Tailscale Credentials, LocalAPI unavailable, disconnected daemon, tailnet mismatch, LocalAPI status mapping, and identity-derived editable defaults.
 - Updated Issue 3 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Fixed configure-time LocalAPI tailnet verification to use the local node ID against the saved tailnet's Tailscale cloud device list when LocalAPI exposes the node ID, avoiding false mismatches between API tailnet identifiers and local display or MagicDNS names.
+- Kept a local name/suffix fallback for LocalAPI statuses that do not expose a self node ID.
+- Fixed interactive `myn auth tailscale` browser opening to wait for the opener exit status, so a started-but-failing `xdg-open`/`open` still prints the Tailscale Keys URL fallback.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused Tailscale regression tests and `go test ./...` from `go/cli`.

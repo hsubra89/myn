@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"tailscale.com/client/local"
+	tailscale "tailscale.com/client/tailscale/v2"
 	"tailscale.com/ipn/ipnstate"
 )
 
@@ -20,6 +22,7 @@ type personalServerLocalTailscaleStatus struct {
 	TailnetName    string
 	MagicDNSSuffix string
 	Identity       string
+	SelfNodeID     string
 }
 
 type personalServerLocalTailscaleClientFunc func(context.Context) (personalServerLocalTailscaleStatus, error)
@@ -28,8 +31,22 @@ func (fn personalServerLocalTailscaleClientFunc) Status(ctx context.Context) (pe
 	return fn(ctx)
 }
 
+type personalServerTailscaleCloudClient interface {
+	TailnetContainsNodeID(ctx context.Context, nodeID string) (bool, error)
+}
+
+type personalServerTailscaleCloudClientFunc func(context.Context, string) (bool, error)
+
+func (fn personalServerTailscaleCloudClientFunc) TailnetContainsNodeID(ctx context.Context, nodeID string) (bool, error) {
+	return fn(ctx, nodeID)
+}
+
 type personalServerLocalAPIClient struct {
 	client *local.Client
+}
+
+type personalServerTailscaleAPIClient struct {
+	client *tailscale.Client
 }
 
 func (client personalServerLocalAPIClient) Status(ctx context.Context) (personalServerLocalTailscaleStatus, error) {
@@ -58,6 +75,7 @@ func personalServerLocalTailscaleStatusFromIPN(status *ipnstate.Status) personal
 		out.MagicDNSSuffix = status.CurrentTailnet.MagicDNSSuffix
 	}
 	if status.Self != nil {
+		out.SelfNodeID = strings.TrimSpace(string(status.Self.ID))
 		if profile, ok := status.User[status.Self.UserID]; ok {
 			out.Identity = strings.TrimSpace(profile.LoginName)
 			if out.Identity == "" {
@@ -66,6 +84,30 @@ func personalServerLocalTailscaleStatusFromIPN(status *ipnstate.Status) personal
 		}
 	}
 	return out
+}
+
+func (client personalServerTailscaleAPIClient) TailnetContainsNodeID(ctx context.Context, nodeID string) (bool, error) {
+	nodeID = normalizePersonalServerTailnet(nodeID)
+	if nodeID == "" {
+		return false, nil
+	}
+
+	cloudClient := client.client
+	if cloudClient == nil {
+		return false, fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	devices, err := cloudClient.Devices().List(ctx)
+	if err != nil {
+		return false, mapTailscaleValidationError(ctx, "saved Tailscale tailnet device listing", err)
+	}
+	for _, device := range devices {
+		for _, candidate := range []string{device.NodeID, device.ID} {
+			if normalizePersonalServerTailnet(candidate) == nodeID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (gate personalServerProvisioningGate) verifyLocalTailscaleForPersonalServerCreation(ctx context.Context, cfg tailscaleConfig) (personalServerLocalTailscaleStatus, error) {
@@ -81,7 +123,11 @@ func (gate personalServerProvisioningGate) verifyLocalTailscaleForPersonalServer
 	if state != tailscaleBackendStateRunning {
 		return personalServerLocalTailscaleStatus{}, fmt.Errorf("local Tailscale daemon is not connected (state: %s); connect to Tailscale before running `myn configure`", state)
 	}
-	if !personalServerTailnetMatches(cfg.Tailnet, status) {
+	matches, err := gate.localTailscaleMatchesSavedCredentials(ctx, cfg, status)
+	if err != nil {
+		return personalServerLocalTailscaleStatus{}, err
+	}
+	if !matches {
 		return personalServerLocalTailscaleStatus{}, fmt.Errorf("local Tailscale daemon is connected to tailnet %q, but saved Tailscale Credentials use %q", status.bestTailnetName(), strings.TrimSpace(cfg.Tailnet))
 	}
 	if strings.TrimSpace(status.Identity) == "" {
@@ -91,6 +137,19 @@ func (gate personalServerProvisioningGate) verifyLocalTailscaleForPersonalServer
 	return status, nil
 }
 
+func (gate personalServerProvisioningGate) localTailscaleMatchesSavedCredentials(ctx context.Context, cfg tailscaleConfig, status personalServerLocalTailscaleStatus) (bool, error) {
+	selfNodeID := strings.TrimSpace(status.SelfNodeID)
+	if selfNodeID == "" {
+		return personalServerTailnetNamesMatch(cfg.Tailnet, status), nil
+	}
+
+	matches, err := gate.tailscaleCloudClient(cfg).TailnetContainsNodeID(ctx, selfNodeID)
+	if err != nil {
+		return false, fmt.Errorf("verify local Tailscale tailnet against saved credentials: %w", err)
+	}
+	return matches, nil
+}
+
 func (gate personalServerProvisioningGate) localTailscaleClient() personalServerLocalTailscaleClient {
 	if gate.newLocalTailscaleClient != nil {
 		return gate.newLocalTailscaleClient()
@@ -98,7 +157,20 @@ func (gate personalServerProvisioningGate) localTailscaleClient() personalServer
 	return personalServerLocalAPIClient{}
 }
 
-func personalServerTailnetMatches(savedTailnet string, status personalServerLocalTailscaleStatus) bool {
+func (gate personalServerProvisioningGate) tailscaleCloudClient(cfg tailscaleConfig) personalServerTailscaleCloudClient {
+	if gate.newTailscaleCloudClient != nil {
+		return gate.newTailscaleCloudClient(cfg)
+	}
+	client, err := newTailscaleAPIClient(os.Getenv("TAILSCALE_ENDPOINT"), nil, cfg.Token, cfg.Tailnet)
+	if err != nil {
+		return personalServerTailscaleCloudClientFunc(func(context.Context, string) (bool, error) {
+			return false, err
+		})
+	}
+	return personalServerTailscaleAPIClient{client: client}
+}
+
+func personalServerTailnetNamesMatch(savedTailnet string, status personalServerLocalTailscaleStatus) bool {
 	saved := normalizePersonalServerTailnet(savedTailnet)
 	if saved == "" {
 		return false

@@ -202,6 +202,7 @@ const (
 type personalServerProvisioningGate struct {
 	newCloudClient          func(token string) personalServerCloudClient
 	newLocalTailscaleClient func() personalServerLocalTailscaleClient
+	newTailscaleCloudClient func(tailscaleConfig) personalServerTailscaleCloudClient
 	saveConfig              func(path string, cfg appConfig) error
 	runSSH                  personalServerSSHRunner
 	sleep                   func(context.Context, time.Duration) error
