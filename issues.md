@@ -262,20 +262,22 @@ Type: HITL
 
 Suggested label: `ready-for-human`
 
+Status: Ready for Human (docs updated; live validation pending)
+
 ## What to build
 
 Update user-facing documentation and live validation so the Tailscale-only provisioning flow is documented and tested against real Hetzner and Tailscale behavior. This slice includes the real smoke test because it needs valid Tailscale API access, tailnet policy permissions, local Tailscale daemon connectivity, and a billable Hetzner server.
 
 ## Acceptance criteria
 
-- [ ] Setup docs describe `myn auth hetzner`, `myn auth tailscale`, and `myn configure` in the new required order.
-- [ ] Docs explain that new Personal Servers are Tailscale-only, IPv6-only publicly, have no public inbound SSH or Mosh, and use Tailscale SSH through ordinary `ssh`.
-- [ ] Docs explain saved Tailscale Credentials versus one-off Tailscale Machine Auth Keys.
-- [ ] Docs explain required Tailscale API token capabilities and tailnet policy changes in user-facing language.
-- [ ] Docs describe the legacy public-SSH migration break and expected migration message.
+- [x] Setup docs describe `myn auth hetzner`, `myn auth tailscale`, and `myn configure` in the new required order.
+- [x] Docs explain that new Personal Servers are Tailscale-only, IPv6-only publicly, have no public inbound SSH or Mosh, and use Tailscale SSH through ordinary `ssh`.
+- [x] Docs explain saved Tailscale Credentials versus one-off Tailscale Machine Auth Keys.
+- [x] Docs explain required Tailscale API token capabilities and tailnet policy changes in user-facing language.
+- [x] Docs describe the legacy public-SSH migration break and expected migration message.
 - [ ] Live validation provisions an IPv6-only Tailscale Personal Server, verifies Tailscale device registration and SSH reachability, verifies bootstrap marker/tool setup, and cleans up the billable server.
 - [ ] Live validation verifies the firewall has no public inbound rules and no public SSH or Mosh access is documented as available.
-- [ ] Live validation instructions document required Hetzner and Tailscale environment variables or secrets.
+- [x] Live validation instructions document required Hetzner and Tailscale environment variables or secrets.
 
 ## Blocked by
 

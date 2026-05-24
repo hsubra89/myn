@@ -131,3 +131,11 @@
 - Added regression coverage for verified existing Tailscale servers, missing Tailscale devices, legacy public-SSH migration, incomplete Tailscale config, stale missing Hetzner server behavior, non-interactive behavior, and the Hetzner endpoint override.
 - Updated Issue 9 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 10 as the next highest-priority remaining task because the implementation work was complete through Issue 9, and the user-facing docs still described the old public SSH and Mosh provisioning model.
+- Updated `go/cli/README.md` to document the required `myn auth hetzner`, `myn auth tailscale`, `myn configure` order, Tailscale Credentials, one-off Machine Auth Keys, configure-time LocalAPI preflight, Tailnet Policy changes, IPv6-only/no-public-ingress provisioning, Tailscale SSH connection behavior, and the legacy public-SSH migration break.
+- Replaced the stale live Hetzner validation section with human-run Tailscale-only live validation prerequisites and smoke-test checks, including required Hetzner and Tailscale secrets.
+- Updated Issue 10 status and checked off the completed documentation and live-validation-instruction acceptance criteria while leaving the real billable live smoke test pending for a human.
+- Verified with `git diff --check` and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
