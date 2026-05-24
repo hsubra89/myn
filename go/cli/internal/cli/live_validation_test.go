@@ -32,6 +32,7 @@ const (
 	liveValidationRemoteRoot          = "Remote Projects"
 	liveValidationGitName             = "Myn Live Validation"
 	liveValidationGitEmail            = "myn-live@example.invalid"
+	liveValidationHomebrewIPv4Skip    = "Homebrew tools skipped: IPv4 egress to GitHub/Homebrew infrastructure is unavailable"
 )
 
 type liveValidationCredentials struct {
@@ -273,8 +274,8 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	assertLiveValidationServer(t, server, cfg, serverName, prompter.selectedLocationName, prompter.selectedServerTypeName)
 	assertLiveValidationFirewall(t, ctx, client)
 	assertLiveValidationTailscaleDevice(t, ctx, cfg)
-	assertLiveValidationBootstrap(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
-	assertLiveValidationRemoteSetup(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
+	marker := assertLiveValidationBootstrap(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
+	assertLiveValidationRemoteSetup(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost, marker)
 }
 
 func loadLiveValidationCredentialsFromRepoRoot(repoRoot string) (liveValidationCredentials, error) {
@@ -419,6 +420,155 @@ printf '%s\n' 'Tailscale SSH banner on stderr' >&2
 	}
 	if !strings.Contains(out.String(), "Tailscale SSH banner") {
 		t.Fatalf("stderr should be surfaced to the user, got %q", out.String())
+	}
+}
+
+func TestAssertLiveValidationBootstrapAllowsHomebrewIPv4PartialFailure(t *testing.T) {
+	marker := `{
+  "status": "success",
+  "timestamp": "2026-05-24T12:00:00Z",
+  "toolVersions": {
+    "tailscale": "1.82.0",
+    "docker": "Docker version 26.1.4",
+    "dockerCompose": "Docker Compose version v2.27.1"
+  },
+  "partialFailures": ["Homebrew tools skipped: IPv4 egress to GitHub/Homebrew infrastructure is unavailable"]
+}`
+	prependFakeSSHToPath(t, "#!/bin/sh\nprintf '%s\\n' "+shellQuote(marker)+"\n")
+
+	assertLiveValidationBootstrap(t, context.Background(), filepath.Join(t.TempDir(), "known_hosts"), "harish-personal-server")
+}
+
+func TestValidateLiveValidationBootstrapMarkerRequiresHomebrewToolsWithoutIPv4PartialFailure(t *testing.T) {
+	err := validateLiveValidationBootstrapMarker(personalServerBootstrapMarker{
+		Status: "success",
+		ToolVersions: map[string]string{
+			"tailscale":     "1.82.0",
+			"docker":        "Docker version 26.1.4",
+			"dockerCompose": "Docker Compose version v2.27.1",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing Homebrew-managed tool error")
+	}
+	if !strings.Contains(err.Error(), "missing brew version") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAssertLiveValidationRemoteSetupSkipsNodeChecksWhenHomebrewWasSkipped(t *testing.T) {
+	prependFakeSSHToPath(t, `#!/bin/sh
+last=
+for arg in "$@"; do
+  last="$arg"
+done
+
+case "$last" in
+  true)
+    ;;
+  "id -un")
+    printf '%s\n' 'melive'
+    ;;
+  getent\ passwd*)
+    printf '%s\n' 'melive:/bin/bash'
+    ;;
+  id\ -nG*)
+    printf '%s\n' 'melive sudo docker'
+    ;;
+  stat\ -c*)
+    printf '%s\n' 'melive:melive:directory'
+    ;;
+  "docker --version && docker compose version")
+    printf '%s\n' 'Docker version 26.1.4'
+    printf '%s\n' 'Docker Compose version v2.27.1'
+    ;;
+  *"nvm version default"*)
+    printf '%s\n' 'unexpected nvm check' >&2
+    exit 40
+    ;;
+  *"/home/linuxbrew/.linuxbrew/bin/git config"*)
+    printf '%s\n' 'unexpected Homebrew git check' >&2
+    exit 41
+    ;;
+  "git config --global user.name")
+    printf '%s\n' 'Myn Live Validation'
+    ;;
+  "git config --global user.email")
+    printf '%s\n' 'myn-live@example.invalid'
+    ;;
+  systemctl\ is-active*)
+    printf '%s\n' 'inactive inactive inactive inactive'
+    ;;
+  "command -v mosh || true")
+    ;;
+  *)
+    printf 'unexpected command: %s\n' "$last" >&2
+    exit 42
+    ;;
+esac
+`)
+
+	assertLiveValidationRemoteSetup(t, context.Background(), filepath.Join(t.TempDir(), "known_hosts"), "harish-personal-server", personalServerBootstrapMarker{
+		Status:          "success",
+		PartialFailures: []string{liveValidationHomebrewIPv4Skip},
+	})
+}
+
+func TestAssertLiveValidationRemoteSetupChecksNodeWhenHomebrewWasNotSkipped(t *testing.T) {
+	sawNVMCheckPath := filepath.Join(t.TempDir(), "saw-nvm-check")
+	t.Setenv("SAW_NVM_CHECK", sawNVMCheckPath)
+	prependFakeSSHToPath(t, `#!/bin/sh
+last=
+for arg in "$@"; do
+  last="$arg"
+done
+
+case "$last" in
+  true)
+    ;;
+  "id -un")
+    printf '%s\n' 'melive'
+    ;;
+  getent\ passwd*)
+    printf '%s\n' 'melive:/bin/bash'
+    ;;
+  id\ -nG*)
+    printf '%s\n' 'melive sudo docker'
+    ;;
+  stat\ -c*)
+    printf '%s\n' 'melive:melive:directory'
+    ;;
+  "docker --version && docker compose version")
+    printf '%s\n' 'Docker version 26.1.4'
+    printf '%s\n' 'Docker Compose version v2.27.1'
+    ;;
+  *"nvm version default"*)
+    printf '%s\n' 'checked' >"$SAW_NVM_CHECK"
+    printf '%s\n' 'v20.12.2 v20.12.2'
+    ;;
+  "/home/linuxbrew/.linuxbrew/bin/git config --global user.name")
+    printf '%s\n' 'Myn Live Validation'
+    ;;
+  "/home/linuxbrew/.linuxbrew/bin/git config --global user.email")
+    printf '%s\n' 'myn-live@example.invalid'
+    ;;
+  systemctl\ is-active*)
+    printf '%s\n' 'inactive inactive inactive inactive'
+    ;;
+  "command -v mosh || true")
+    ;;
+  *)
+    printf 'unexpected command: %s\n' "$last" >&2
+    exit 42
+    ;;
+esac
+`)
+
+	assertLiveValidationRemoteSetup(t, context.Background(), filepath.Join(t.TempDir(), "known_hosts"), "harish-personal-server", personalServerBootstrapMarker{
+		Status: "success",
+	})
+	if !fileExists(sawNVMCheckPath) {
+		t.Fatal("expected live validation to check nvm/Node when Homebrew was not skipped")
 	}
 }
 
@@ -646,35 +796,62 @@ func assertLiveValidationTailscaleDevice(t *testing.T, ctx context.Context, cfg 
 	t.Logf("Tailscale device %q is tagged, authorized, and online", cfg.PersonalServer.TailscaleHost)
 }
 
-func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, knownHostsPath string, host string) {
+func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, knownHostsPath string, host string) personalServerBootstrapMarker {
 	t.Helper()
 	markerOutput := liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "cat "+personalServerBootstrapMarkerPath)
 	marker, err := parsePersonalServerBootstrapMarker(markerOutput)
 	if err != nil {
 		t.Fatalf("parse live Personal Server Bootstrap marker: %v", err)
 	}
-	if strings.ToLower(marker.Status) != "success" {
-		t.Fatalf("live Personal Server Bootstrap marker was not successful: %#v", marker)
+	if err := validateLiveValidationBootstrapMarker(marker); err != nil {
+		t.Fatal(err)
 	}
 
-	requiredTools := []string{"docker", "dockerCompose", "brew", "tmux", "jq", "git", "gh", "rustup", "go", "nvm", "node", "npm"}
+	logLiveValidationOptionalAgentVersions(t, marker)
+	if len(marker.PartialFailures) > 0 {
+		t.Logf("live Personal Server Bootstrap reported partial failures: %v", marker.PartialFailures)
+	}
+	return marker
+}
+
+func validateLiveValidationBootstrapMarker(marker personalServerBootstrapMarker) error {
+	if strings.ToLower(marker.Status) != "success" {
+		return fmt.Errorf("live Personal Server Bootstrap marker was not successful: %#v", marker)
+	}
+	requiredTools := []string{"tailscale", "docker", "dockerCompose"}
+	if !liveValidationMarkerHasPartialFailure(marker, liveValidationHomebrewIPv4Skip) {
+		requiredTools = append(requiredTools, "brew", "tmux", "jq", "git", "gh", "rustup", "go", "nvm", "node", "npm")
+	}
 	for _, tool := range requiredTools {
 		if strings.TrimSpace(marker.ToolVersions[tool]) == "" {
-			t.Fatalf("live Personal Server Bootstrap marker is missing %s version: %#v", tool, marker.ToolVersions)
+			return fmt.Errorf("live Personal Server Bootstrap marker is missing %s version: %#v", tool, marker.ToolVersions)
 		}
 	}
+	return nil
+}
+
+func logLiveValidationOptionalAgentVersions(t *testing.T, marker personalServerBootstrapMarker) {
+	t.Helper()
 	for _, optionalAgent := range []string{"codex", "claude"} {
 		if strings.TrimSpace(marker.ToolVersions[optionalAgent]) == "" {
 			t.Logf("live Personal Server Bootstrap marker has no %s version; partial failures: %v", optionalAgent, marker.PartialFailures)
 		}
 	}
-	if len(marker.PartialFailures) > 0 {
-		t.Logf("live Personal Server Bootstrap reported partial failures: %v", marker.PartialFailures)
-	}
 }
 
-func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHostsPath string, host string) {
+func liveValidationMarkerHasPartialFailure(marker personalServerBootstrapMarker, failure string) bool {
+	for _, partialFailure := range marker.PartialFailures {
+		if strings.TrimSpace(partialFailure) == failure {
+			return true
+		}
+	}
+	return false
+}
+
+func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHostsPath string, host string, marker personalServerBootstrapMarker) {
 	t.Helper()
+	homebrewSkipped := liveValidationMarkerHasPartialFailure(marker, liveValidationHomebrewIPv4Skip)
+
 	liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "true")
 	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "id -un")); got != liveValidationUser {
 		t.Fatalf("live Personal Server User SSH mismatch: want %q, got %q", liveValidationUser, got)
@@ -698,14 +875,23 @@ func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHos
 	}
 
 	liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "docker --version && docker compose version")
-	nvmOutput := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "source /etc/profile.d/myn-personal-server.sh && nvm version default && node --version"))
-	if len(nvmOutput) < 2 || nvmOutput[0] == "N/A" || nvmOutput[0] != nvmOutput[1] {
-		t.Fatalf("live nvm default mismatch: %v", nvmOutput)
+	if !homebrewSkipped {
+		nvmOutput := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "source /etc/profile.d/myn-personal-server.sh && nvm version default && node --version"))
+		if len(nvmOutput) < 2 || nvmOutput[0] == "N/A" || nvmOutput[0] != nvmOutput[1] {
+			t.Fatalf("live nvm default mismatch: %v", nvmOutput)
+		}
+	} else {
+		t.Logf("skipping live nvm/Node checks because bootstrap reported: %s", liveValidationHomebrewIPv4Skip)
 	}
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.name")); got != liveValidationGitName {
+
+	gitCommand := "/home/linuxbrew/.linuxbrew/bin/git"
+	if homebrewSkipped {
+		gitCommand = "git"
+	}
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, gitCommand+" config --global user.name")); got != liveValidationGitName {
 		t.Fatalf("live Git user.name mismatch: want %q, got %q", liveValidationGitName, got)
 	}
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.email")); got != liveValidationGitEmail {
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, gitCommand+" config --global user.email")); got != liveValidationGitEmail {
 		t.Fatalf("live Git user.email mismatch: want %q, got %q", liveValidationGitEmail, got)
 	}
 	if got := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "systemctl is-active ssh sshd ssh.socket sshd.socket 2>/dev/null || true")); containsString(got, "active") {

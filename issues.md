@@ -480,3 +480,27 @@ Remove the remaining `BatchMode=yes` option from the fallback Personal Server SS
 ## Blocked by
 
 - Issue 14: Remove identity-file branch from Personal Server SSH runner
+
+## Issue 19: Allow live validation to accept IPv4-egress Homebrew skip
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Update the gated Tailscale-only live validation harness to match the current IPv6-only bootstrap behavior. When the Personal Server Bootstrap marker reports that Homebrew tools were skipped because IPv4 egress to GitHub/Homebrew infrastructure is unavailable, live validation should still verify the server identity, Tailscale SSH path, Docker setup, disabled system OpenSSH, no Mosh install, Git identity, and bootstrap success instead of failing solely because Homebrew-managed tools such as brew, tmux, gh, Go, nvm, or Node are missing.
+
+## Acceptance criteria
+
+- [x] Live validation accepts a successful bootstrap marker that includes the documented Homebrew IPv4-egress partial failure and core Tailscale/Docker tool versions.
+- [x] Live validation still requires Homebrew-managed tool versions when the Homebrew IPv4-egress partial failure is not present.
+- [x] Remote live validation checks skip nvm/Node checks only when the bootstrap marker reports the Homebrew IPv4-egress partial failure.
+- [x] Remote live validation continues to verify Docker, Git identity, disabled system OpenSSH, and no Mosh install in the Homebrew-skipped case.
+- [x] Focused tests cover the Homebrew-skipped live validation path without provisioning cloud resources.
+
+## Blocked by
+
+None - can start immediately.

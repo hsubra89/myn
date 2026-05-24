@@ -256,3 +256,12 @@
 - Changed bootstrap marker waiting to run the marker poll loop inside one check-aware Tailscale SSH session instead of opening a new SSH session for every poll.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with focused bootstrap/provisioning regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 19 as the next highest-priority agent-owned task because Issue 10 remains human-gated, and the live validation harness still treated the newly supported Homebrew IPv4-egress partial failure as a hard live-validation failure.
+- Added Issue 19 to track aligning gated live validation with the current IPv6-only bootstrap behavior when Homebrew/GitHub IPv4 egress is unavailable.
+- Used a focused TDD slice to first reproduce that a successful bootstrap marker with the documented Homebrew IPv4-egress partial failure still failed live validation for missing `brew`, then taught marker validation to require only Tailscale and Docker versions for that case while still requiring Homebrew-managed versions otherwise.
+- Threaded the parsed bootstrap marker into remote live checks so nvm/Node validation is skipped only for the documented Homebrew skip, while Docker, Git identity, disabled system OpenSSH, and no-Mosh checks still run.
+- Updated Issue 19 status and acceptance criteria in `issues.md`.
+- Verified with focused live-validation tests, `go test ./...` from `go/cli`, and `git diff --check`.
