@@ -460,6 +460,11 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return err
 	}
 
+	firewall, err := ensurePersonalServerFirewall(ctx, client)
+	if err != nil {
+		return err
+	}
+
 	machineAuthKey, err := gate.createPersonalServerTailscaleMachineAuthKey(ctx, cfg.Auth.Tailscale)
 	if err != nil {
 		return err
@@ -474,11 +479,6 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		GitIdentity:             plan.GitIdentity,
 		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
 	})
-	if err != nil {
-		return err
-	}
-
-	firewall, err := ensurePersonalServerFirewall(ctx, client)
 	if err != nil {
 		return err
 	}

@@ -131,7 +131,7 @@ After Tailnet Policy is confirmed and applied, `myn configure` should create a f
 - [x] The key is created immediately before rendering cloud-init and creating the Hetzner server.
 - [x] The key is passed into bootstrap rendering but never saved to config or printed to command output.
 - [x] Configure does not attempt to revoke the key after successful join.
-- [x] Tests cover key request shape, ordering relative to policy and server creation, no persistence, no output leakage, and create-key failure before cloud resources.
+- [x] Tests cover key request shape, ordering relative to policy and server creation, no persistence, no output leakage, and create-key failure before cloud-init rendering or server creation.
 
 ## Blocked by
 
@@ -433,3 +433,27 @@ Make `myn configure` fail clearly when a saved Tailscale-only Personal Server Co
 ## Blocked by
 
 - Issue 9: Verify existing Tailscale Personal Server configuration
+
+## Issue 17: Create Machine Auth Key after firewall readiness
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Move one-off Tailscale Machine Auth Key creation later in `myn configure` so all pre-server Hetzner setup that can fail before server creation, especially Personal Server Firewall creation or reconciliation, completes before the ten-minute Machine Auth Key is created. The key should still be created immediately before rendering cloud-init and creating the server.
+
+## Acceptance criteria
+
+- [x] Personal Server Firewall creation or reconciliation happens before Machine Auth Key creation.
+- [x] Firewall creation or reconciliation failure does not create a Machine Auth Key.
+- [x] Machine Auth Key creation remains after Tailnet Policy apply and before cloud-init rendering and server creation.
+- [x] Tests cover the ordering and the firewall-failure no-key case.
+
+## Blocked by
+
+- Issue 5: Create one-off Tailscale Machine Auth Keys for provisioning
+- Issue 7: Provision IPv6-only Hetzner servers with no public ingress

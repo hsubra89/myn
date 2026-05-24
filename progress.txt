@@ -230,3 +230,12 @@
 - Updated existing-server verification to fail with `myn auth tailscale` guidance before any Tailscale device lookup when saved Tailscale Credentials are missing.
 - Updated Issue 16 status and acceptance criteria in `issues.md`.
 - Verified with focused existing-server verification tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 17 as the next highest-priority agent-owned task after finding that `myn configure` created the ten-minute Tailscale Machine Auth Key before Personal Server Firewall creation or reconciliation.
+- Added Issue 17 to track moving Machine Auth Key creation until after firewall readiness while keeping it after Tailnet Policy apply and immediately before cloud-init rendering and server creation.
+- Used a focused TDD slice to first reproduce the old ordering and the firewall-failure key leak, then moved `ensurePersonalServerFirewall` before Machine Auth Key creation.
+- Updated auth-key failure coverage to reflect the new boundary: a key failure can now happen after reusable firewall readiness, but still stops before cloud-init rendering, server creation, and Personal Server Configuration save.
+- Updated Issue 17 status and acceptance criteria in `issues.md`.
+- Verified with focused Machine Auth Key/firewall ordering tests, `go test ./...` from `go/cli`, and `git diff --check`.

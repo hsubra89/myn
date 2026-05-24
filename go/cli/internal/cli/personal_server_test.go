@@ -1547,7 +1547,7 @@ func TestPersonalServerCreationPlanDoesNotShowSSHKey(t *testing.T) {
 	}
 }
 
-func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResources(t *testing.T) {
+func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyAndFirewallBeforeCloudInitAndServer(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -1624,9 +1624,9 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 
 	if got, want := events, []string{
 		"policy.apply",
+		"cloud.create-firewall",
 		"tailscale.auth-key",
 		"bootstrap.render",
-		"cloud.create-firewall",
 		"cloud.create-server",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("event order mismatch: want %#v, got %#v", want, got)
@@ -1658,7 +1658,89 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 	}
 }
 
-func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudResources(t *testing.T) {
+func TestRunConfigureFirewallFailureStopsBeforeTailscaleMachineAuthKey(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	events := []string{}
+	cloud := successfulPersonalServerCloudClient()
+	cloud.events = &events
+	cloud.createFirewallErr = errors.New("firewall API unavailable")
+	policy := &fakePersonalServerTailnetPolicyClient{
+		rawPolicy:  `{}`,
+		rawETag:    "etag-before",
+		events:     &events,
+		applyEvent: "policy.apply",
+	}
+	authKeys := &fakePersonalServerMachineAuthKeyClient{
+		key:    "tskey-auth-secret",
+		events: &events,
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true, true},
+		},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+			tailnetPolicyEnabled:    true,
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
+				return policy
+			},
+			newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
+				return authKeys
+			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
+			userHomeDir: func() (string, error) {
+				return home, nil
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected firewall creation error")
+	}
+	if !strings.Contains(err.Error(), "create Personal Server Firewall: firewall API unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := events, []string{"policy.apply", "cloud.create-firewall"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("event order mismatch: want %#v, got %#v", want, got)
+	}
+	if len(authKeys.requests) != 0 {
+		t.Fatalf("firewall failure should stop before Machine Auth Key creation, got %#v", authKeys.requests)
+	}
+	if cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("firewall failure should stop before server creation, got request %#v", cloud.serverCreateRequest)
+	}
+}
+
+func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudInitServerCreationAndConfigSave(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -1714,8 +1796,11 @@ func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudResources(t *
 	if !strings.Contains(err.Error(), "create Tailscale Machine Auth Key: Tailscale API unavailable") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("auth key failure should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID == 0 {
+		t.Fatalf("auth key failure should happen after reusable firewall readiness, got firewall=%#v", cloud.createdFirewall)
+	}
+	if cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("auth key failure should stop before server creation, got request=%#v", cloud.serverCreateRequest)
 	}
 	cfg, err := loadAppConfig(configPath)
 	if err != nil {
@@ -2970,6 +3055,7 @@ func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 			{Direction: "in", Protocol: "tcp", Port: "2222", SourceIPs: []string{"198.51.100.0/24"}},
 		},
 	}
+	events := []string{}
 	cloud := &fakePersonalServerCloudClient{
 		locations: []personalServerLocation{{Name: "ash", Description: "Ashburn, VA, USA"}},
 		serverTypes: []personalServerType{
@@ -2986,6 +3072,10 @@ func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 			IPv4: "203.0.113.55",
 			IPv6: "2001:db8::55",
 		},
+		events: &events,
+	}
+	authKeys := &fakePersonalServerMachineAuthKeyClient{
+		events: &events,
 	}
 	prompter := &fakeConfigurePrompter{
 		canPrompt: true,
@@ -3015,8 +3105,10 @@ func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 			newCloudClient: func(string) personalServerCloudClient {
 				return cloud
 			},
-			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
-			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
+			newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
+				return authKeys
+			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -3037,6 +3129,9 @@ func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 	}
 	if got, want := cloud.serverCreateRequest.FirewallID, existingFirewall.ID; got != want {
 		t.Fatalf("server create firewall mismatch: want %d, got %d", want, got)
+	}
+	if got, want := events, []string{"cloud.set-firewall-rules", "tailscale.auth-key", "cloud.create-server"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("existing firewall event order mismatch: want %#v, got %#v", want, got)
 	}
 	if !strings.Contains(out.String(), "Firewall: myn-personal-server (existing Myn-managed firewall reconciled to no public inbound rules)") {
 		t.Fatalf("expected existing firewall caveat in output, got %q", out.String())
@@ -3503,6 +3598,7 @@ type fakePersonalServerCloudClient struct {
 	images                  []personalServerImage
 	firewallsByName         map[string]personalServerFirewall
 	createdFirewall         personalServerFirewall
+	createFirewallErr       error
 	serverCreateRequest     personalServerCreateServerRequest
 	createdServer           personalServerCloudServer
 	cancelAfterCreateServer func()
@@ -3804,6 +3900,9 @@ func (c *fakePersonalServerCloudClient) CreateFirewall(ctx context.Context, fire
 	}
 	if c.events != nil {
 		*c.events = append(*c.events, "cloud.create-firewall")
+	}
+	if c.createFirewallErr != nil {
+		return personalServerFirewall{}, nil, c.createFirewallErr
 	}
 	if firewall.ID == 0 {
 		firewall.ID = 2001
