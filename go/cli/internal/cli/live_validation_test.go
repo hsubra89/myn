@@ -105,6 +105,24 @@ func TestLiveValidationCredentialsReportsMissingTailscaleCredentials(t *testing.
 	}
 }
 
+func TestLoadLiveValidationCredentialsFromRepoRootReportsMissingCredential(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, ".env.local"), []byte(`
+HETZNER_API_KEY=hetzner-token
+TAILSCALE_TAILNET=example.com
+`), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	_, err := loadLiveValidationCredentialsFromRepoRoot(repoRoot)
+	if err == nil {
+		t.Fatal("expected missing TAILSCALE_API_TOKEN error")
+	}
+	if !strings.Contains(err.Error(), "TAILSCALE_API_TOKEN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLivePersonalServerProvisioning(t *testing.T) {
 	if os.Getenv(liveValidationEnabledEnv) != "1" {
 		t.Skipf("set %s=1 to run live Tailscale-only Personal Server validation", liveValidationEnabledEnv)
@@ -114,13 +132,13 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	credentials, err := loadLiveValidationCredentialsFromRepoRoot(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	env, err := loadLiveValidationEnvFile(filepath.Join(repoRoot, ".env.local"))
 	if err != nil {
-		t.Skip(err.Error())
-	}
-	credentials, err := liveValidationCredentialsFromEnv(env)
-	if err != nil {
-		t.Skip(err.Error())
+		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), liveValidationTestTimeout)
@@ -256,6 +274,14 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	assertLiveValidationTailscaleDevice(t, ctx, cfg)
 	assertLiveValidationBootstrap(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
 	assertLiveValidationRemoteSetup(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
+}
+
+func loadLiveValidationCredentialsFromRepoRoot(repoRoot string) (liveValidationCredentials, error) {
+	env, err := loadLiveValidationEnvFile(filepath.Join(repoRoot, ".env.local"))
+	if err != nil {
+		return liveValidationCredentials{}, err
+	}
+	return liveValidationCredentialsFromEnv(env)
 }
 
 func loadLiveValidationEnvFile(path string) (map[string]string, error) {

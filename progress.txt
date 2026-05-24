@@ -157,3 +157,12 @@
 - Changed configure's SSH identity setup gate so missing Tailscale Credentials no longer trigger legacy SSH identity setup when Hetzner Credentials are present; the Personal Server path now reaches the `myn auth tailscale` guidance first.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrapScriptDisablesOpenSSHUnits|TestRunConfigureMissingTailscaleCredentialsSkipsSSHIdentitySetup|TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer'` and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Attempted the remaining Issue 10 live validation first because it was the only open task, but the gated run skipped immediately because `.env.local` is missing `TAILSCALE_API_TOKEN`; left Issue 10 pending for a human run with complete credentials.
+- Added Issue 12 as the highest-priority agent-owned gap because explicitly enabled live validation should fail clearly when prerequisites are missing rather than reporting a skipped passing test.
+- Updated `TestLivePersonalServerProvisioning` so `MYN_LIVE_TAILSCALE=1` treats missing `.env.local` or missing Hetzner/Tailscale variables as hard prerequisite failures with the specific missing variable name.
+- Added focused coverage for the repository-root live-validation credential loader without using real credentials or creating cloud resources.
+- Updated Issue 12 status and acceptance criteria in `issues.md`.
+- Verified with the focused live-validation prerequisite tests, confirmed the ungated live test still skips, confirmed the enabled gate now fails clearly with the missing `TAILSCALE_API_TOKEN` message in this checkout, and ran `go test ./...` from `go/cli`.

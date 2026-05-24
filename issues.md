@@ -317,3 +317,26 @@ Finish removing the legacy local SSH identity dependency from new Personal Serve
 ## Blocked by
 
 - Issue 6: Render Tailscale-first Personal Server Bootstrap
+
+## Issue 12: Fail enabled live validation when prerequisites are missing
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Make the gated Tailscale-only live validation fail clearly when `MYN_LIVE_TAILSCALE=1` is set but required live-validation prerequisites are missing. Missing `.env.local`, `HETZNER_API_KEY`, `TAILSCALE_API_TOKEN`, or `TAILSCALE_TAILNET` should not produce a skipped passing test once the user has explicitly enabled the billable live validation gate.
+
+## Acceptance criteria
+
+- [x] `TestLivePersonalServerProvisioning` still skips when `MYN_LIVE_TAILSCALE` is not set to `1`.
+- [x] When `MYN_LIVE_TAILSCALE=1`, missing `.env.local` fails the test with a clear prerequisite message.
+- [x] When `MYN_LIVE_TAILSCALE=1`, missing required Hetzner or Tailscale credentials fail the test with the specific missing variable name.
+- [x] Focused tests cover the live-validation prerequisite loader without requiring real credentials or creating cloud resources.
+
+## Blocked by
+
+None - can start immediately.
