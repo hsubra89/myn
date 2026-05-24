@@ -90,3 +90,13 @@
 - Updated existing provisioning tests to assert no SSH-key lookup, creation, attachment, or command output leakage for new Tailscale-only Personal Servers.
 - Updated Issue 11 status and acceptance criteria in `issues.md`, and unblocked Issue 7.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 7 as the next highest-priority unblocked task because IPv6-only Hetzner provisioning and no-public-ingress firewalls unblock the remaining Tailscale-only configure orchestration.
+- Used a TDD loop around Personal Server provisioning tests to lock in IPv4-disabled/IPv6-enabled server creation, no public inbound firewall rules, Tailscale Host server labels, and the new saved config shape.
+- Updated Personal Server creation to save `serverID`, Personal Server User, `tailscaleHost`, and public IPv6 inventory only; public IPv4 is no longer saved or printed as an access path.
+- Changed the reusable `myn-personal-server` firewall to be created with no rules, reconciled to no rules when it is Myn-managed, and rejected when an existing firewall with that name is not Myn-managed.
+- Updated final plan and bootstrap completion/failure output to describe IPv6-only public networking, no public inbound firewall rules, the Tailscale Host, public IPv6 inventory, and `myn connect` without public SSH or Mosh commands.
+- Updated Issue 7 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

@@ -961,8 +961,9 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Server Type: cx32",
 		"Server name: harish-dev",
 		"Personal Server User: harish-subra",
-		"Firewall: myn-personal-server (inbound SSH and Mosh UDP 60000-61000 over IPv4 and IPv6)",
-		"Public network: IPv4 and IPv6 enabled",
+		"Firewall: myn-personal-server (no public inbound rules)",
+		"Public network: IPv4 disabled, IPv6 enabled for inventory and outbound bootstrap",
+		"Tailscale Host: harish-dev",
 		"Remote project root: ~/Remote Projects",
 		"Install plan:",
 		"System services:",
@@ -979,7 +980,7 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Git identity:",
 		"- user.name: Global Name",
 		"- user.email: local@example.test",
-		"Maximum monthly price: 19.10 EUR gross",
+		"Maximum monthly price: 18.50 EUR gross",
 		"Personal Server creation declined. No cloud resources were created.",
 	} {
 		if !strings.Contains(output, want) {
@@ -1023,7 +1024,7 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 	cloud := &fakePersonalServerCloudClient{
 		locations: []personalServerLocation{{Name: "ash", Description: "Ashburn, VA, USA"}},
 		serverTypes: []personalServerType{
-			fakePersonalServerType("cx32", "shared", "x86", false, 4, 8, 80, "local", "ash", true, false, "18.50"),
+			fakePersonalServerType("cx32", "shared", "x86", false, 4, 8, 80, "local", "ash", true, false, ""),
 		},
 		pricingErr: errors.New("pricing unavailable"),
 		images: []personalServerImage{
@@ -1179,10 +1180,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if got, want := cloud.createdFirewall.Labels, personalServerResourceLabels(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("created firewall labels mismatch: want %v, got %v", want, got)
 	}
-	if got, want := cloud.createdFirewall.Rules, []personalServerFirewallRule{
-		{Direction: "in", Protocol: "tcp", Port: "22", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-		{Direction: "in", Protocol: "udp", Port: "60000-61000", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-	}; !reflect.DeepEqual(got, want) {
+	if got, want := cloud.createdFirewall.Rules, []personalServerFirewallRule(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("created firewall rules mismatch: want %#v, got %#v", want, got)
 	}
 	if len(cloud.sshKeyFingerprints) != 0 {
@@ -1204,10 +1202,14 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if got, want := create.ImageName, "ubuntu-24.04"; got != want {
 		t.Fatalf("server create image mismatch: want %q, got %q", want, got)
 	}
-	if !create.EnableIPv4 || !create.EnableIPv6 {
-		t.Fatalf("server create should enable IPv4 and IPv6, got %#v", create)
+	if create.EnableIPv4 || !create.EnableIPv6 {
+		t.Fatalf("server create should disable IPv4 and enable IPv6, got %#v", create)
 	}
-	if got, want := create.Labels, personalServerResourceLabels(); !reflect.DeepEqual(got, want) {
+	if got, want := create.Labels, map[string]string{
+		"managed_by":     "myn",
+		"role":           "personal_server",
+		"tailscale_host": "harish-personal-server",
+	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("server create labels mismatch: want %v, got %v", want, got)
 	}
 	if got := create.SSHKeyID; got != 0 {
@@ -1227,11 +1229,17 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("saved Personal Server Configuration mismatch: want %#v, got %#v", want, got)
 	}
 	if !strings.Contains(out.String(), "Personal Server created: server 654321.") {
 		t.Fatalf("expected created output, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Personal Server public IPv6 inventory: 2001:db8::55") {
+		t.Fatalf("expected public IPv6 inventory output, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "203.0.113.55") {
+		t.Fatalf("output should not print public IPv4 as an access path, got %q", out.String())
 	}
 }
 
@@ -1494,7 +1502,6 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
   "rebootRequired": true,
   "toolVersions": {
     "docker": "Docker version 28.1.0",
-    "mosh": "mosh-server (mosh 1.4.0)",
     "node": "v24.0.0"
   },
   "partialFailures": ["Claude Code install failed"]
@@ -1557,16 +1564,11 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"Reboot required: true",
 		"Installed tool versions:",
 		"- docker: Docker version 28.1.0",
-		"- mosh: mosh-server (mosh 1.4.0)",
 		"- node: v24.0.0",
 		"Partial bootstrap failures:",
 		"- Claude Code install failed",
-		"SSH commands:",
-		"- user IPv4: ssh -l harish 203.0.113.55",
-		"- user IPv6: ssh -l harish 2001:db8::55",
-		"Mosh commands:",
-		"- user IPv4: mosh --ssh=\"ssh\" harish@203.0.113.55",
-		"- user IPv6: mosh --ssh=\"ssh\" harish@2001:db8::55",
+		"Tailscale Host: harish-personal-server",
+		"Connect with: myn connect",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1575,6 +1577,10 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	for _, forbidden := range []string{
 		"- root IPv4: ssh -l root 203.0.113.55",
 		"- root IPv6: ssh -l root 2001:db8::55",
+		"- user IPv4: ssh -l harish 203.0.113.55",
+		"- user IPv6: ssh -l harish 2001:db8::55",
+		"Mosh commands:",
+		"- mosh:",
 	} {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("successful bootstrap should not print root SSH command %q, got %q", forbidden, output)
@@ -1809,7 +1815,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("saved Personal Server Configuration mismatch: want %#v, got %#v", want, got)
 	}
 	output := out.String()
@@ -1818,8 +1824,8 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		"Bootstrap failure: apt-get upgrade (exit 1)",
 		"Partial bootstrap failures:",
 		"- Codex install failed",
-		"SSH commands:",
-		"- root IPv4: ssh -l root 203.0.113.55",
+		"Tailscale Host: harish-personal-server",
+		"Public IPv6 inventory: 2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1898,14 +1904,14 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("saved Personal Server Configuration mismatch: want %#v, got %#v", want, got)
 	}
 	output := out.String()
 	for _, want := range []string{
 		"Personal Server bootstrap failed: timed out waiting for Personal Server Bootstrap marker",
-		"SSH commands:",
-		"- user IPv4: ssh -l harish 203.0.113.55",
+		"Tailscale Host: harish-personal-server",
+		"Public IPv6 inventory: 2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -2046,7 +2052,7 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("cancellation after creation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
 	}
 }
@@ -2118,7 +2124,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("root SSH cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
 	}
 }
@@ -2193,7 +2199,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
 		t.Fatalf("marker polling cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
 	}
 }
@@ -2357,8 +2363,9 @@ func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 	}
 
 	existingFirewall := personalServerFirewall{
-		ID:   2222,
-		Name: "myn-personal-server",
+		ID:     2222,
+		Name:   "myn-personal-server",
+		Labels: personalServerResourceLabels(),
 		Rules: []personalServerFirewallRule{
 			{Direction: "in", Protocol: "tcp", Port: "2222", SourceIPs: []string{"198.51.100.0/24"}},
 		},
@@ -2425,8 +2432,8 @@ func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 	if cloud.createdFirewall.ID != 0 {
 		t.Fatalf("expected existing firewall to be reused, created %#v", cloud.createdFirewall)
 	}
-	if got, want := cloud.firewallsByName["myn-personal-server"].Rules, existingFirewall.Rules; !reflect.DeepEqual(got, want) {
-		t.Fatalf("existing firewall rules should be left untouched: want %#v, got %#v", want, got)
+	if got, want := cloud.firewallsByName["myn-personal-server"].Rules, []personalServerFirewallRule(nil); !reflect.DeepEqual(got, want) {
+		t.Fatalf("existing Myn-managed firewall rules should be reconciled: want %#v, got %#v", want, got)
 	}
 	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) || len(cloud.sshKeyFingerprints) != 0 {
 		t.Fatalf("Personal Server creation should not create or look up SSH keys, got created=%#v lookups=%v", cloud.createdSSHKey, cloud.sshKeyFingerprints)
@@ -2437,8 +2444,79 @@ func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 	if got := cloud.serverCreateRequest.SSHKeyID; got != 0 {
 		t.Fatalf("server create should not attach an SSH key, got %d", got)
 	}
-	if !strings.Contains(out.String(), "Firewall: myn-personal-server (existing rules reused unchanged; Mosh may require inbound UDP 60000-61000)") {
+	if !strings.Contains(out.String(), "Firewall: myn-personal-server (existing Myn-managed firewall reconciled to no public inbound rules)") {
 		t.Fatalf("expected existing firewall caveat in output, got %q", out.String())
+	}
+}
+
+func TestRunConfigureFailsForUnmanagedExistingFirewallBeforeServerCreation(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := &fakePersonalServerCloudClient{
+		locations: []personalServerLocation{{Name: "ash", Description: "Ashburn, VA, USA"}},
+		serverTypes: []personalServerType{
+			fakePersonalServerType("cx32", "shared", "x86", false, 4, 8, 80, "local", "ash", true, false, "18.50"),
+		},
+		firewallsByName: map[string]personalServerFirewall{
+			"myn-personal-server": {
+				ID:   2222,
+				Name: "myn-personal-server",
+				Rules: []personalServerFirewallRule{
+					{Direction: "in", Protocol: "tcp", Port: "2222", SourceIPs: []string{"198.51.100.0/24"}},
+				},
+			},
+		},
+	}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		inputs:    []string{"harish", "harish-personal-server"},
+		passwords: []string{"server-secret", "server-secret"},
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter:     prompter,
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected unmanaged firewall error")
+	}
+	if !strings.Contains(err.Error(), `existing Personal Server Firewall "myn-personal-server" is not Myn-managed`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(prompter.confirmCalls) != 0 {
+		t.Fatalf("unmanaged firewall should fail before final confirmation, got confirms %v", prompter.confirmCalls)
+	}
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("unmanaged firewall should stop before cloud resources, got firewall=%#v server=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 }
 
@@ -3030,6 +3108,21 @@ func (c *fakePersonalServerCloudClient) CreateFirewall(ctx context.Context, fire
 	}
 	c.createdFirewall = firewall
 	return firewall, nil, nil
+}
+
+func (c *fakePersonalServerCloudClient) SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error) {
+	if err := c.recordContext(ctx); err != nil {
+		return nil, err
+	}
+	if c.events != nil {
+		*c.events = append(*c.events, "cloud.set-firewall-rules")
+	}
+	if c.firewallsByName == nil {
+		c.firewallsByName = map[string]personalServerFirewall{}
+	}
+	firewall.Rules = rules
+	c.firewallsByName[firewall.Name] = firewall
+	return []personalServerAction{{ID: 9002}}, nil
 }
 
 func (c *fakePersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {

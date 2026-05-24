@@ -47,6 +47,7 @@ type personalServerCreateCloudClient interface {
 	Images(ctx context.Context) ([]personalServerImage, error)
 	FirewallByName(ctx context.Context, name string) (personalServerFirewall, bool, error)
 	CreateFirewall(ctx context.Context, firewall personalServerFirewall) (personalServerFirewall, []personalServerAction, error)
+	SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error)
 	SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error)
 	CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error)
 	CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error)
@@ -175,18 +176,17 @@ type personalServerCreationInputs struct {
 }
 
 type personalServerCreationPlan struct {
-	Location                   personalServerLocation
-	ServerType                 personalServerType
-	User                       string
-	ServerName                 string
-	PasswordHash               string
-	GitIdentity                personalServerGitIdentity
-	RemoteProjectRoot          string
-	SSHIdentityFile            string
-	TailscaleIdentity          string
-	TailnetPolicy              personalServerTailnetPolicyPlan
-	ExistingFirewall           bool
-	PrimaryIPv4MonthlyGrossEUR string
+	Location          personalServerLocation
+	ServerType        personalServerType
+	User              string
+	ServerName        string
+	PasswordHash      string
+	GitIdentity       personalServerGitIdentity
+	RemoteProjectRoot string
+	SSHIdentityFile   string
+	TailscaleIdentity string
+	TailnetPolicy     personalServerTailnetPolicyPlan
+	ExistingFirewall  bool
 }
 
 type personalServerGitIdentity struct {
@@ -350,14 +350,6 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 		return fmt.Errorf("no eligible Server Types are available in any Location")
 	}
 
-	pricing, err := client.Pricing(ctx)
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		pricing = personalServerPricing{}
-	}
-
 	defaultLocation := defaultPersonalServerLocationChoice(locationChoices)
 	for {
 		locationChoice, err := prompter.SelectPersonalServerLocation(locationChoices, defaultLocation)
@@ -411,11 +403,6 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			}
 			plan.ExistingFirewall = existingFirewall
 		}
-		plan.PrimaryIPv4MonthlyGrossEUR, _ = personalServerPrimaryIPMonthlyGrossText(
-			pricing,
-			string(hcloud.PrimaryIPTypeIPv4),
-			locationChoice.Location.Name,
-		)
 		writePersonalServerCreationPlan(out, plan)
 
 		create, err := prompter.Confirm("Create Personal Server?", false)
@@ -486,42 +473,43 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		ImageName:      image.Name,
 		FirewallID:     firewall.ID,
 		UserData:       userData,
-		Labels:         personalServerResourceLabels(),
-		EnableIPv4:     true,
+		Labels:         personalServerServerLabels(plan.ServerName),
+		EnableIPv4:     false,
 		EnableIPv6:     true,
 	})
 	if err != nil {
 		return fmt.Errorf("create Personal Server: %w", err)
 	}
 	if err := client.WaitActions(ctx, actions); err != nil {
-		if saveErr := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User); saveErr != nil {
+		if saveErr := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User, plan.ServerName); saveErr != nil {
 			return saveErr
 		}
 		return fmt.Errorf("wait for Personal Server create actions: %w", err)
 	}
 
-	if err := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User); err != nil {
+	if err := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User, plan.ServerName); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "Personal Server created: server %d.\n", server.ID)
-	fmt.Fprintf(out, "Personal Server addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
+	fmt.Fprintf(out, "Personal Server Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintf(out, "Personal Server public IPv6 inventory: %s\n", displayPersonalServerAddress(server.IPv6))
 
 	marker, err := gate.waitForPersonalServerBootstrap(ctx, plan.User, server)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		return err
 	}
 	return writePersonalServerBootstrapReport(out, marker, plan, server)
 }
 
-func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPath string, cfg appConfig, server personalServerCloudServer, user string) error {
+func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPath string, cfg appConfig, server personalServerCloudServer, user string, tailscaleHost string) error {
 	cfg.PersonalServer = personalServerConfig{
-		ServerID: server.ID,
-		User:     user,
-		IPv4:     server.IPv4,
-		IPv6:     server.IPv6,
+		ServerID:      server.ID,
+		User:          user,
+		TailscaleHost: tailscaleHost,
+		IPv6:          server.IPv6,
 	}
 	return gate.writeConfig(appConfigPath, cfg)
 }
@@ -644,8 +632,7 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 		fmt.Fprintf(out, "Reboot required: %t\n", marker.RebootRequired)
 		writePersonalServerToolVersions(out, marker.ToolVersions)
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
-		writePersonalServerUserSSHCommands(out, plan, server)
-		writePersonalServerMoshCommands(out, plan, server)
+		writePersonalServerConnectionHint(out, plan)
 		return nil
 	case "failed":
 		fmt.Fprintln(out, "Personal Server bootstrap failed.")
@@ -653,15 +640,25 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 			fmt.Fprintf(out, "Bootstrap failure: %s\n", marker.Failure)
 		}
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		if strings.TrimSpace(marker.Failure) != "" {
 			return fmt.Errorf("Personal Server Bootstrap failed: %s", marker.Failure)
 		}
 		return fmt.Errorf("Personal Server Bootstrap failed")
 	default:
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		return fmt.Errorf("Personal Server Bootstrap marker has unknown status %q", marker.Status)
 	}
+}
+
+func writePersonalServerConnectionHint(out io.Writer, plan personalServerCreationPlan) {
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintln(out, "Connect with: myn connect")
+}
+
+func writePersonalServerInspectionHint(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintf(out, "Public IPv6 inventory: %s\n", displayPersonalServerAddress(server.IPv6))
 }
 
 func writePersonalServerToolVersions(out io.Writer, versions map[string]string) {
@@ -908,16 +905,26 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 		return personalServerFirewall{}, fmt.Errorf("find Personal Server Firewall: %w", err)
 	}
 	if found {
+		if !personalServerFirewallIsMynManaged(firewall) {
+			return personalServerFirewall{}, fmt.Errorf("existing Personal Server Firewall %q is not Myn-managed; rename it or remove it before provisioning", personalServerFirewallName)
+		}
+		if len(firewall.Rules) == 0 {
+			return firewall, nil
+		}
+		actions, err := client.SetFirewallRules(ctx, firewall, nil)
+		if err != nil {
+			return personalServerFirewall{}, fmt.Errorf("reconcile Personal Server Firewall rules: %w", err)
+		}
+		if err := client.WaitActions(ctx, actions); err != nil {
+			return personalServerFirewall{}, fmt.Errorf("wait for Personal Server Firewall rule reconciliation actions: %w", err)
+		}
+		firewall.Rules = nil
 		return firewall, nil
 	}
 
 	firewall, actions, err := client.CreateFirewall(ctx, personalServerFirewall{
 		Name:   personalServerFirewallName,
 		Labels: personalServerResourceLabels(),
-		Rules: []personalServerFirewallRule{
-			{Direction: "in", Protocol: "tcp", Port: "22", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-			{Direction: "in", Protocol: "udp", Port: personalServerMoshUDPPortRange, SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-		},
 	})
 	if err != nil {
 		return personalServerFirewall{}, fmt.Errorf("create Personal Server Firewall: %w", err)
@@ -929,11 +936,19 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 }
 
 func personalServerFirewallExists(ctx context.Context, client personalServerCreateCloudClient) (bool, error) {
-	_, found, err := client.FirewallByName(ctx, personalServerFirewallName)
+	firewall, found, err := client.FirewallByName(ctx, personalServerFirewallName)
 	if err != nil {
 		return false, fmt.Errorf("find Personal Server Firewall: %w", err)
 	}
+	if found && !personalServerFirewallIsMynManaged(firewall) {
+		return false, fmt.Errorf("existing Personal Server Firewall %q is not Myn-managed; rename it or remove it before provisioning", personalServerFirewallName)
+	}
 	return found, nil
+}
+
+func personalServerFirewallIsMynManaged(firewall personalServerFirewall) bool {
+	labels := firewall.Labels
+	return labels["managed_by"] == "myn" && labels["role"] == "personal_server"
 }
 
 func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreateCloudClient, identity sshIdentityCandidate) (personalServerSSHKey, error) {
@@ -975,6 +990,14 @@ func personalServerResourceLabels() map[string]string {
 		"managed_by": "myn",
 		"role":       "personal_server",
 	}
+}
+
+func personalServerServerLabels(tailscaleHost string) map[string]string {
+	labels := personalServerResourceLabels()
+	if host := strings.TrimSpace(tailscaleHost); host != "" {
+		labels["tailscale_host"] = host
+	}
+	return labels
 }
 
 func (gate personalServerProvisioningGate) loadPersonalServerSSHIdentity(identityFile string) (sshIdentityCandidate, error) {
@@ -1281,11 +1304,12 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintf(out, "Personal Server User: %s\n", plan.User)
 	fmt.Fprintln(out, "SSH and network:")
 	if plan.ExistingFirewall {
-		fmt.Fprintf(out, "Firewall: %s (existing rules reused unchanged; Mosh may require inbound UDP %s)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+		fmt.Fprintf(out, "Firewall: %s (existing Myn-managed firewall reconciled to no public inbound rules)\n", personalServerFirewallName)
 	} else {
-		fmt.Fprintf(out, "Firewall: %s (inbound SSH and Mosh UDP %s over IPv4 and IPv6)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+		fmt.Fprintf(out, "Firewall: %s (no public inbound rules)\n", personalServerFirewallName)
 	}
-	fmt.Fprintln(out, "Public network: IPv4 and IPv6 enabled")
+	fmt.Fprintln(out, "Public network: IPv4 disabled, IPv6 enabled for inventory and outbound bootstrap")
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
 	writePersonalServerTailnetPolicySummary(out, plan.TailnetPolicy)
 	fmt.Fprintf(out, "Remote project root: ~/%s\n", plan.RemoteProjectRoot)
 	fmt.Fprintln(out, "Install plan:")
@@ -1500,12 +1524,7 @@ func personalServerCreationPlanMonthlyGrossText(plan personalServerCreationPlan)
 		return "", false
 	}
 
-	primaryIPv4Price, ok := parsePersonalServerMonthlyGrossEUR(plan.PrimaryIPv4MonthlyGrossEUR)
-	if !ok {
-		return "", false
-	}
-
-	return formatPersonalServerMonthlyGrossEUR(serverPrice + primaryIPv4Price), true
+	return formatPersonalServerMonthlyGrossEUR(serverPrice), true
 }
 
 func personalServerPrimaryIPMonthlyGrossText(pricing personalServerPricing, ipType string, locationName string) (string, bool) {
@@ -1764,6 +1783,20 @@ func (client hcloudPersonalServerCloudClient) CreateFirewall(ctx context.Context
 	return personalServerFirewallFromHcloud(result.Firewall), personalServerActionsFromHcloud(result.Actions), nil
 }
 
+func (client hcloudPersonalServerCloudClient) SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error) {
+	hcloudRules, err := hcloudFirewallRules(rules)
+	if err != nil {
+		return nil, err
+	}
+	actions, _, err := client.client.Firewall.SetRules(ctx, &hcloud.Firewall{ID: int64(firewall.ID)}, hcloud.FirewallSetRulesOpts{
+		Rules: hcloudRules,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return personalServerActionsFromHcloud(actions), nil
+}
+
 func (client hcloudPersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
 	sshKey, _, err := client.client.SSHKey.GetByFingerprint(ctx, fingerprint)
 	if err != nil {
@@ -1788,11 +1821,10 @@ func (client hcloudPersonalServerCloudClient) CreateSSHKey(ctx context.Context, 
 }
 
 func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {
-	result, _, err := client.client.Server.Create(ctx, hcloud.ServerCreateOpts{
+	opts := hcloud.ServerCreateOpts{
 		Name:       request.Name,
 		ServerType: &hcloud.ServerType{Name: request.ServerTypeName},
 		Image:      &hcloud.Image{ID: int64(request.ImageID), Name: request.ImageName},
-		SSHKeys:    []*hcloud.SSHKey{{ID: int64(request.SSHKeyID)}},
 		Location:   &hcloud.Location{Name: request.LocationName},
 		UserData:   request.UserData,
 		Labels:     request.Labels,
@@ -1803,7 +1835,12 @@ func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, 
 			EnableIPv4: request.EnableIPv4,
 			EnableIPv6: request.EnableIPv6,
 		},
-	})
+	}
+	if request.SSHKeyID != 0 {
+		opts.SSHKeys = []*hcloud.SSHKey{{ID: int64(request.SSHKeyID)}}
+	}
+
+	result, _, err := client.client.Server.Create(ctx, opts)
 	if err != nil {
 		return personalServerCloudServer{}, nil, err
 	}

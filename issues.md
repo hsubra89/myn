@@ -172,21 +172,23 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Change Hetzner provisioning so new Personal Servers are IPv6-only from the public network perspective and attach to a Myn-managed firewall with no public inbound rules. Save IPv6 as inventory only, add the Tailscale Host as an inventory label, and reconcile the reusable firewall safely.
 
 ## Acceptance criteria
 
-- [ ] Server creation disables public IPv4 and enables public IPv6.
-- [ ] Public IPv6 is saved in Personal Server Configuration as inventory only.
-- [ ] Public IPv4 is not saved for new Personal Servers.
-- [ ] Hetzner server labels include Myn ownership labels and the Tailscale Host for inventory.
-- [ ] Newly created `myn-personal-server` firewalls have no inbound rules.
-- [ ] Existing `myn-personal-server` firewalls with Myn labels are reconciled to no inbound rules.
-- [ ] Existing `myn-personal-server` firewalls without Myn labels cause provisioning to fail before server creation.
-- [ ] Output and final plan describe IPv6-only public networking and no public inbound access.
-- [ ] Tests cover server create request, saved config, labels, new firewall rules, managed firewall reconciliation, unmanaged firewall failure, and output.
+- [x] Server creation disables public IPv4 and enables public IPv6.
+- [x] Public IPv6 is saved in Personal Server Configuration as inventory only.
+- [x] Public IPv4 is not saved for new Personal Servers.
+- [x] Hetzner server labels include Myn ownership labels and the Tailscale Host for inventory.
+- [x] Newly created `myn-personal-server` firewalls have no inbound rules.
+- [x] Existing `myn-personal-server` firewalls with Myn labels are reconciled to no inbound rules.
+- [x] Existing `myn-personal-server` firewalls without Myn labels cause provisioning to fail before server creation.
+- [x] Output and final plan describe IPv6-only public networking and no public inbound access.
+- [x] Tests cover server create request, saved config, labels, new firewall rules, managed firewall reconciliation, unmanaged firewall failure, and output.
 
 ## Blocked by
 
