@@ -298,8 +298,13 @@ disable_systemd_unit_now() {
 }
 
 disable_system_openssh() {
+  disable_systemd_unit_now ssh.socket
+  disable_systemd_unit_now sshd.socket
   disable_systemd_unit_now ssh
   disable_systemd_unit_now sshd
+  if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
+    fail_openssh_disable "OpenSSH socket is still active"
+  fi
   if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
     fail_openssh_disable "OpenSSH service is still active"
   fi
@@ -309,6 +314,7 @@ mark_failed() {
   local status="$?"
   local command="${BASH_COMMAND:-unknown command}"
   trap - ERR
+  cleanup_tailscale_auth_key
   write_marker "failed" "$command (exit $status)"
   exit "$status"
 }

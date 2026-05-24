@@ -111,3 +111,12 @@
 - Added tests for the Tailscale-only happy path, duplicate Tailscale Host conflict, device timeout, unauthorized/offline devices, SSH timeout, and updated bootstrap polling expectations.
 - Updated Issue 8 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Updated the generated Personal Server Bootstrap script to disable and verify `ssh.socket` and `sshd.socket` as well as the `ssh` and `sshd` services, so socket-activated OpenSSH cannot keep public SSH listening after the hardening step reports success.
+- Updated the generic bootstrap failure trap to remove `/run/myn/tailscale-auth-key` before writing a failed marker, covering failures before `tailscale up` consumes the one-off Machine Auth Key.
+- Added focused bootstrap renderer regression tests for OpenSSH socket disablement and generic-failure auth-key cleanup.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrap'` and `go test ./...` from `go/cli`.

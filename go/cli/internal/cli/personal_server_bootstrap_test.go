@@ -120,8 +120,12 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"os.chmod(path, 0o644)",
 		"Personal Server Tailscale join failed",
 		"Personal Server system OpenSSH disablement failed",
+		"disable_systemd_unit_now ssh.socket",
+		"disable_systemd_unit_now sshd.socket",
 		"disable_systemd_unit_now ssh",
 		"systemctl disable --now \"$unit\"",
+		"systemctl is-active --quiet ssh.socket",
+		"OpenSSH socket is still active",
 		"MYN_PARTIAL_FAILURES+=(\"Codex install failed\")",
 		"MYN_PARTIAL_FAILURES+=(\"Claude Code install failed\")",
 		"\"status\"",
@@ -159,6 +163,56 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("bootstrap script should not contain %q:\n%s", forbidden, script)
 		}
+	}
+}
+
+func TestRenderPersonalServerBootstrapScriptDisablesOpenSSHSockets(t *testing.T) {
+	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: "tskey-auth-secret",
+		RemoteProjectRoot:       "projects",
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
+
+	want := `disable_system_openssh() {
+  disable_systemd_unit_now ssh.socket
+  disable_systemd_unit_now sshd.socket
+  disable_systemd_unit_now ssh
+  disable_systemd_unit_now sshd
+  if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
+    fail_openssh_disable "OpenSSH socket is still active"
+  fi
+  if systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
+    fail_openssh_disable "OpenSSH service is still active"
+  fi
+}`
+	if !strings.Contains(script, want) {
+		t.Fatalf("bootstrap script should disable and verify OpenSSH socket units:\n%s", script)
+	}
+}
+
+func TestRenderPersonalServerBootstrapScriptCleansAuthKeyOnGenericFailure(t *testing.T) {
+	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: "tskey-auth-secret",
+		RemoteProjectRoot:       "projects",
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
+
+	want := `mark_failed() {
+  local status="$?"
+  local command="${BASH_COMMAND:-unknown command}"
+  trap - ERR
+  cleanup_tailscale_auth_key
+  write_marker "failed" "$command (exit $status)"
+  exit "$status"
+}`
+	if !strings.Contains(script, want) {
+		t.Fatalf("bootstrap script should remove the Machine Auth Key before writing generic failure markers:\n%s", script)
 	}
 }
 

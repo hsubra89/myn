@@ -1,8 +1,3 @@
-# Review notes
-
-- `go/cli/internal/cli/personal_server_bootstrap.go:300` disables only `ssh` and `sshd` services; Ubuntu socket-activated OpenSSH can leave `ssh.socket`/`sshd.socket` active, so bootstrap may report OpenSSH disablement success while public SSH still listens. Disable and verify the matching socket units too.
-- `go/cli/internal/cli/personal_server_bootstrap.go:308` writes a failed marker on generic bootstrap errors without removing `/run/myn/tailscale-auth-key`; failures before `tailscale up`, such as Tailscale apt install failures, leave the unconsumed Machine Auth Key on disk until expiry. Clean it up in the generic failure trap.
-
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.
