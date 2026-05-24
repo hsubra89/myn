@@ -83,9 +83,9 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 
 	lockPassword := false
 	config := personalServerCloudInit{
-		PackageUpdate:           true,
-		PackageUpgrade:          true,
-		PackageRebootIfRequired: true,
+		PackageUpdate:           false,
+		PackageUpgrade:          false,
+		PackageRebootIfRequired: false,
 		SSHPwAuth:               false,
 		DisableRoot:             false,
 		Groups:                  []string{"docker"},
@@ -100,6 +100,12 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 			},
 		},
 		WriteFiles: []personalServerCloudInitWriteFile{
+			{
+				Path:        personalServerTailscaleAuthKeyPath,
+				Owner:       "root:root",
+				Permissions: "0600",
+				Content:     strings.TrimSpace(input.TailscaleMachineAuthKey) + "\n",
+			},
 			{
 				Path:        personalServerBootstrapScriptPath,
 				Owner:       "root:root",
@@ -330,11 +336,9 @@ curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailsca
 apt-get update
 apt-get install -y tailscale
 systemctl enable --now tailscaled
-install -d -m 0700 "$(dirname "$MYN_TAILSCALE_AUTH_KEY_FILE")"
-install -m 0600 /dev/null "$MYN_TAILSCALE_AUTH_KEY_FILE"
-cat >"$MYN_TAILSCALE_AUTH_KEY_FILE" <<'MYN_TAILSCALE_AUTH_KEY'`)
-	fmt.Fprintln(b, strings.TrimSpace(input.TailscaleMachineAuthKey))
-	fmt.Fprintln(b, `MYN_TAILSCALE_AUTH_KEY
+if [ ! -s "$MYN_TAILSCALE_AUTH_KEY_FILE" ]; then
+  fail_tailscale_join "missing auth key file"
+fi
 chmod 0600 "$MYN_TAILSCALE_AUTH_KEY_FILE"
 if ! tailscale up --auth-key="file:$MYN_TAILSCALE_AUTH_KEY_FILE" --hostname="$MYN_TAILSCALE_HOST" --ssh; then
   fail_tailscale_join "tailscale up failed"

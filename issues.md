@@ -1,10 +1,3 @@
-# Review notes
-
-- Require Tailscale SSH check mode: `planPersonalServerTailnetPolicy` emits `action: "accept"` while setting `checkPeriod: "always"`, and sufficiency checks also accept only `action: "accept"` rules. Tailscale only enforces `checkPeriod` for `action: "check"`, so the policy can grant SSH without per-connection checks. See `go/cli/internal/cli/personal_server_tailnet_policy.go:81` and `go/cli/internal/cli/personal_server_tailnet_policy.go:384`.
-- Keep the Machine Auth Key out of persistent cloud-init scripts: cloud-init writes `/usr/local/sbin/myn-personal-server-bootstrap.sh` as `0755`, and the rendered script embeds the one-off key before copying it into `/run/myn/tailscale-auth-key`. Pass the key through a root-only transient channel instead. See `go/cli/internal/cli/personal_server_bootstrap.go:102` and `go/cli/internal/cli/personal_server_bootstrap.go:333`.
-- Re-read and re-validate Tailnet Policy after the final creation confirmation even when the preview plan was no-op. `createPersonalServer` calls the apply hook after confirmation, but `applyTailnetPolicyForPersonalServer` returns immediately for no-op plans, leaving a policy-edit race before auth-key and cloud creation. See `go/cli/internal/cli/personal_server.go:426`, `go/cli/internal/cli/personal_server.go:450`, and `go/cli/internal/cli/personal_server_tailnet_policy.go:156`.
-- Disable cloud-init package updates/upgrades before Tailscale joins: `package_update` and `package_upgrade` are enabled, so cloud-init can run package work before the Tailscale-first `runcmd` script establishes Tailscale SSH. Move package work into the script after `tailscale up` or disable the cloud-init package flags. See `go/cli/internal/cli/personal_server_bootstrap.go:84` and `go/cli/internal/cli/personal_server_bootstrap.go:321`.
-
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.

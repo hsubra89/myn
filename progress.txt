@@ -69,3 +69,13 @@
 - Added Issue 11 for the remaining PRD gap where configure/provisioning still depends on a local SSH identity and Hetzner SSH Key outside the bootstrap renderer.
 - Updated Issue 6 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Changed generated and sufficient Tailscale SSH policy rules from `action: "accept"` to `action: "check"` so `checkPeriod: "always"` is enforced, and added regression coverage for rejecting `accept` SSH rules.
+- Changed post-confirmation Tailnet Policy handling to always re-read and re-validate no-op policy previews, and to fail before Machine Auth Key or cloud resource creation if a no-op preview would require a new unapproved policy edit.
+- Moved the one-off Tailscale Machine Auth Key out of the persistent `0755` bootstrap script and into a root-owned `0600` `/run/myn/tailscale-auth-key` file rendered by cloud-init, with the script only consuming and removing that file.
+- Disabled cloud-init `package_update`, `package_upgrade`, and `package_reboot_if_required` so cloud-init does not run package update/upgrade work before the Tailscale-first bootstrap script.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused policy/bootstrap tests and `go test ./...` from `go/cli`.

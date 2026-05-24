@@ -33,8 +33,8 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	}
 
 	parsed := parseBootstrapCloudInit(t, rendered)
-	if !parsed.PackageUpdate || !parsed.PackageUpgrade || !parsed.PackageRebootIfRequired {
-		t.Fatalf("security updates and reboot-on-required should be enabled, got %#v", parsed)
+	if parsed.PackageUpdate || parsed.PackageUpgrade || parsed.PackageRebootIfRequired {
+		t.Fatalf("cloud-init package updates should be disabled before Tailscale joins, got %#v", parsed)
 	}
 	if parsed.DisableRoot {
 		t.Fatal("root account should remain available to cloud-init")
@@ -71,6 +71,19 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	}
 
 	script := parsed.bootstrapScript()
+	if scriptFile := parsed.writeFile("/usr/local/sbin/myn-personal-server-bootstrap.sh"); scriptFile.Permissions != "0755" {
+		t.Fatalf("bootstrap script permissions mismatch: want 0755, got %#v", scriptFile)
+	}
+	authKeyFile := parsed.writeFile("/run/myn/tailscale-auth-key")
+	if got, want := authKeyFile.Permissions, "0600"; got != want {
+		t.Fatalf("Machine Auth Key file permissions mismatch: want %q, got %#v", want, authKeyFile)
+	}
+	if got, want := authKeyFile.Owner, "root:root"; got != want {
+		t.Fatalf("Machine Auth Key file owner mismatch: want %q, got %#v", want, authKeyFile)
+	}
+	if got, want := authKeyFile.Content, machineAuthKey+"\n"; got != want {
+		t.Fatalf("Machine Auth Key should be passed through root-only file content: want %q, got %q", want, got)
+	}
 	for _, want := range []string{
 		"MYN_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
 		"export MYN_USER='harish'",
@@ -79,7 +92,9 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"curl -fsSL \"https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg\" -o /usr/share/keyrings/tailscale-archive-keyring.gpg",
 		"curl -fsSL \"https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list\" -o /etc/apt/sources.list.d/tailscale.list",
 		"apt-get install -y tailscale",
-		"cat >\"$MYN_TAILSCALE_AUTH_KEY_FILE\" <<'MYN_TAILSCALE_AUTH_KEY'",
+		"if [ ! -s \"$MYN_TAILSCALE_AUTH_KEY_FILE\" ]; then",
+		"fail_tailscale_join \"missing auth key file\"",
+		"chmod 0600 \"$MYN_TAILSCALE_AUTH_KEY_FILE\"",
 		"tailscale up --auth-key=\"file:$MYN_TAILSCALE_AUTH_KEY_FILE\" --hostname=\"$MYN_TAILSCALE_HOST\" --ssh",
 		"rm -f \"$MYN_TAILSCALE_AUTH_KEY_FILE\"",
 		"disable_system_openssh",
@@ -137,18 +152,13 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"sshd -t",
 		"AuthenticationMethods publickey",
 		"$6$abcdefghijklmnop$hashed",
+		machineAuthKey,
 		"--auth-key=" + machineAuthKey,
 		"AllowUsers root",
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("bootstrap script should not contain %q:\n%s", forbidden, script)
 		}
-	}
-	if got, want := strings.Count(script, machineAuthKey), 1; got != want {
-		t.Fatalf("Machine Auth Key should appear exactly once in root-only file content: want %d, got %d\n%s", want, got, script)
-	}
-	if want := "cat >\"$MYN_TAILSCALE_AUTH_KEY_FILE\" <<'MYN_TAILSCALE_AUTH_KEY'\n" + machineAuthKey + "\nMYN_TAILSCALE_AUTH_KEY"; !strings.Contains(script, want) {
-		t.Fatalf("Machine Auth Key should be written only through heredoc to root-only file, missing %q:\n%s", want, script)
 	}
 }
 
@@ -191,8 +201,10 @@ type bootstrapCloudUser struct {
 }
 
 type bootstrapWriteFile struct {
-	Path    string `yaml:"path"`
-	Content string `yaml:"content"`
+	Path        string `yaml:"path"`
+	Owner       string `yaml:"owner"`
+	Permissions string `yaml:"permissions"`
+	Content     string `yaml:"content"`
 }
 
 func parseBootstrapCloudInit(t *testing.T, rendered string) parsedBootstrapCloudInit {
@@ -215,12 +227,16 @@ func (parsed parsedBootstrapCloudInit) user(name string) bootstrapCloudUser {
 }
 
 func (parsed parsedBootstrapCloudInit) bootstrapScript() string {
+	return parsed.writeFile("/usr/local/sbin/myn-personal-server-bootstrap.sh").Content
+}
+
+func (parsed parsedBootstrapCloudInit) writeFile(path string) bootstrapWriteFile {
 	for _, file := range parsed.WriteFiles {
-		if file.Path == "/usr/local/sbin/myn-personal-server-bootstrap.sh" {
-			return file.Content
+		if file.Path == path {
+			return file
 		}
 	}
-	return ""
+	return bootstrapWriteFile{}
 }
 
 func containsString(values []string, want string) bool {

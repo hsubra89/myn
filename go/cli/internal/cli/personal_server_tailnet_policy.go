@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	personalServerTailscaleTag        = "tag:myn-personal-server"
-	personalServerTailnetPolicyTCPSSH = "tcp:22"
-	tailscaleAccessControlsURL        = "https://login.tailscale.com/admin/acls/file"
+	personalServerTailscaleTag           = "tag:myn-personal-server"
+	personalServerTailnetPolicyTCPSSH    = "tcp:22"
+	personalServerTailnetPolicySSHAction = "check"
+	tailscaleAccessControlsURL           = "https://login.tailscale.com/admin/acls/file"
 )
 
 type personalServerTailnetPolicy struct {
@@ -80,7 +81,7 @@ func planPersonalServerTailnetPolicy(rawHuJSON string, input personalServerTailn
 	}
 	if !personalServerTailnetPolicyHasSSHRule(policy, input.Identity, input.Tag, input.User) {
 		patchOps = append(patchOps, personalServerTailnetPolicyArrayPatch(policy.SSH == nil, "/ssh", tailscale.ACLSSH{
-			Action:      "accept",
+			Action:      personalServerTailnetPolicySSHAction,
 			Source:      []string{input.Identity},
 			Destination: []string{input.Tag},
 			Users:       []string{input.User},
@@ -154,7 +155,7 @@ func (gate personalServerProvisioningGate) prepareTailnetPolicyForPersonalServer
 }
 
 func (gate personalServerProvisioningGate) applyTailnetPolicyForPersonalServer(ctx context.Context, cfg tailscaleConfig, input personalServerTailnetPolicyInput, acceptedPlan personalServerTailnetPolicyPlan) error {
-	if !gate.tailnetPolicyEnabled || !acceptedPlan.NeedsChanges {
+	if !gate.tailnetPolicyEnabled {
 		return nil
 	}
 
@@ -172,6 +173,9 @@ func (gate personalServerProvisioningGate) applyTailnetPolicyForPersonalServer(c
 			return fmt.Errorf("re-validate current Tailnet Policy before apply: %w", err)
 		}
 		return nil
+	}
+	if !acceptedPlan.NeedsChanges {
+		return fmt.Errorf("Tailnet Policy changed after preview; rerun configure so Myn can request policy edit consent")
 	}
 	if err := client.ValidatePolicy(ctx, plan.ProposedHuJSON); err != nil {
 		return fmt.Errorf("re-validate proposed Tailnet Policy before apply: %w", err)
@@ -383,7 +387,7 @@ func personalServerTailnetPolicyHasGrant(policy tailscale.ACL, identity string, 
 
 func personalServerTailnetPolicyHasSSHRule(policy tailscale.ACL, identity string, tag string, user string) bool {
 	for _, rule := range policy.SSH {
-		if !policyPrincipalMatches(rule.Action, "accept") {
+		if !policyPrincipalMatches(rule.Action, personalServerTailnetPolicySSHAction) {
 			continue
 		}
 		if !policyPrincipalListExactly(rule.Source, []string{identity}) {
