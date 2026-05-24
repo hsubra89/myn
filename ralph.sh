@@ -66,7 +66,8 @@ run_review_pass() {
     "Write or replace a top-of-file section titled exactly:" \
     "# Review notes" \
     "" \
-    "The Review notes section should contain the highest-priority actionable notes future iterations should address before ordinary issues. Deduplicate findings, discard low-confidence or non-actionable feedback, and keep the notes concise. If no actionable notes remain or the existing notes are no longer valid, remove the section entirely." \
+    "The Review notes section should contain the highest-priority actionable notes future iterations should address before ordinary issues. Deduplicate findings, discard low-confidence or non-actionable feedback, and keep the notes concise. Include file and line number references when possible." \
+    "If no actionable notes remain or the existing notes are no longer valid, remove the section entirely." \
     "" \
     "Do not modify files other than issues.md. Make a git commit when done."
 
