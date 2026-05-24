@@ -202,3 +202,12 @@
 - Ran the normal feedback loop with `go test ./...` from `go/cli`; it passed.
 - Ran the enabled live validation gate with `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v`; it failed before provisioning because `.env.local` is missing `TAILSCALE_API_TOKEN`.
 - Updated Issue 10 status to record the current human prerequisite block; no billable Hetzner server was created and no product code changed.
+
+2026-05-24
+
+- Selected Issue 15 as the next highest-priority agent-owned task after finding that configure still did Tailnet Policy work before reporting duplicate Personal Server names, while Issue 10 remains blocked on human live-validation credentials.
+- Added Issue 15 to track the PRD sequencing gap around duplicate Hetzner server name and Tailscale Host checks before Tailnet Policy work.
+- Used a focused TDD slice: first reproduced that duplicate Hetzner names still read and validated Tailnet Policy, then moved duplicate-name preflight before Tailnet Policy planning while keeping the final pre-create race checks.
+- Added coverage that duplicate Hetzner server names and duplicate Tailscale Hosts fail before Tailnet Policy reads, validation, browser opening, policy-edit prompts, Machine Auth Key creation, or cloud resource creation.
+- Updated Issue 15 status and acceptance criteria in `issues.md`.
+- Verified with focused duplicate-conflict tests, `go test ./internal/cli -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.

@@ -386,3 +386,27 @@ Remove the remaining Personal Server SSH command path that accepts an SSH identi
 ## Blocked by
 
 - Issue 13: Remove stale public-SSH and Mosh provisioning surfaces
+
+## Issue 15: Check Personal Server name conflicts before Tailnet Policy work
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Move duplicate Hetzner server name and duplicate Tailscale Host checks earlier in `myn configure` so a doomed Personal Server name fails before Tailnet Policy planning, browser-opening, validation, edit prompts, mutation, Machine Auth Key creation, or cloud resource creation.
+
+## Acceptance criteria
+
+- [x] Configure checks the selected Personal Server name in Hetzner before Tailnet Policy reads or validation.
+- [x] Configure checks the selected Tailscale Host in the saved tailnet before Tailnet Policy reads or validation.
+- [x] Duplicate-name failures do not open the Tailscale Access Controls page or prompt for Tailnet Policy editing.
+- [x] Existing final pre-create conflict checks remain in place so races after preview still fail before policy mutation, auth key creation, or cloud resources.
+- [x] Tests cover duplicate Hetzner and Tailscale Host conflicts short-circuiting before Tailnet Policy work.
+
+## Blocked by
+
+- Issue 8: Orchestrate Tailscale-only configure completion

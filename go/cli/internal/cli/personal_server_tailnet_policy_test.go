@@ -289,6 +289,7 @@ func TestRunConfigureValidatesProposedTailnetPolicyBeforeFinalConfirmation(t *te
 			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
 				return policy
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			openURL: func(rawURL string) error {
 				opened = append(opened, rawURL)
 				return fmt.Errorf("browser unavailable")
@@ -325,6 +326,166 @@ func TestRunConfigureValidatesProposedTailnetPolicyBeforeFinalConfirmation(t *te
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
+	}
+}
+
+func TestRunConfigureChecksDuplicatePersonalServerNameBeforeTailnetPolicy(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	cloud.serversByName = map[string]personalServerCloudServer{
+		"harish-personal-server": {ID: 111111, Name: "harish-personal-server"},
+	}
+	policy := &fakePersonalServerTailnetPolicyClient{
+		rawPolicy: `{}`,
+		rawETag:   "etag-before",
+	}
+	opened := []string{}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		inputs:    []string{"harish", "harish-personal-server"},
+		passwords: []string{"server-secret", "server-secret"},
+		confirms:  []bool{true, true},
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter: prompter,
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+			tailnetPolicyEnabled:    true,
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
+				return policy
+			},
+			openURL: func(rawURL string) error {
+				opened = append(opened, rawURL)
+				return nil
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate server name error")
+	}
+	if !strings.Contains(err.Error(), `Personal Server name "harish-personal-server" already exists in Hetzner`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy.readPolicies != 0 || len(policy.validatedPolicies) != 0 {
+		t.Fatalf("duplicate server name should fail before Tailnet Policy work, reads=%d validations=%d", policy.readPolicies, len(policy.validatedPolicies))
+	}
+	if len(opened) != 0 {
+		t.Fatalf("duplicate server name should not open Tailscale Access Controls, got %v", opened)
+	}
+	if len(prompter.confirmCalls) != 0 {
+		t.Fatalf("duplicate server name should fail before policy or creation confirmation, got %v", prompter.confirmCalls)
+	}
+}
+
+func TestRunConfigureChecksDuplicateTailscaleHostBeforeTailnetPolicy(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	policy := &fakePersonalServerTailnetPolicyClient{
+		rawPolicy: `{}`,
+		rawETag:   "etag-before",
+	}
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         true,
+				ConnectedToControl: true,
+			}},
+		},
+	}
+	opened := []string{}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		inputs:    []string{"harish", "harish-personal-server"},
+		passwords: []string{"server-secret", "server-secret"},
+		confirms:  []bool{true, true},
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter: prompter,
+		personalServerProvisioner: personalServerProvisioningGate{
+			newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+			tailnetPolicyEnabled:    true,
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+			newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+				return devices
+			},
+			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
+				return policy
+			},
+			openURL: func(rawURL string) error {
+				opened = append(opened, rawURL)
+				return nil
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate Tailscale Host error")
+	}
+	if !strings.Contains(err.Error(), `Tailscale Host "harish-personal-server" already exists in saved tailnet`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy.readPolicies != 0 || len(policy.validatedPolicies) != 0 {
+		t.Fatalf("duplicate Tailscale Host should fail before Tailnet Policy work, reads=%d validations=%d", policy.readPolicies, len(policy.validatedPolicies))
+	}
+	if len(opened) != 0 {
+		t.Fatalf("duplicate Tailscale Host should not open Tailscale Access Controls, got %v", opened)
+	}
+	if len(prompter.confirmCalls) != 0 {
+		t.Fatalf("duplicate Tailscale Host should fail before policy or creation confirmation, got %v", prompter.confirmCalls)
 	}
 }
 

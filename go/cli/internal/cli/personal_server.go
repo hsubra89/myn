@@ -391,6 +391,16 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			RemoteProjectRoot: cfg.Projects.RemoteRoot,
 			TailscaleIdentity: localTailscale.Identity,
 		}
+		if gate.tailnetPolicyEnabled {
+			if createClient, ok := client.(personalServerCreateCloudClient); ok {
+				if err := gate.ensurePersonalServerNameAvailable(ctx, createClient, inputs.ServerName); err != nil {
+					return err
+				}
+			}
+			if err := gate.ensurePersonalServerTailscaleHostAvailable(ctx, gate.tailscaleDeviceClient(cfg.Auth.Tailscale), inputs.ServerName); err != nil {
+				return err
+			}
+		}
 		policyPlan, proceed, err := gate.prepareTailnetPolicyForPersonalServer(ctx, out, cfg.Auth.Tailscale, localTailscale.Identity, inputs.User, prompter)
 		if err != nil {
 			return err
@@ -426,10 +436,8 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 }
 
 func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, client personalServerCreateCloudClient, plan personalServerCreationPlan) error {
-	if _, found, err := client.ServerByName(ctx, plan.ServerName); err != nil {
-		return fmt.Errorf("check for existing Personal Server name %q: %w", plan.ServerName, err)
-	} else if found {
-		return fmt.Errorf("Personal Server name %q already exists in Hetzner", plan.ServerName)
+	if err := gate.ensurePersonalServerNameAvailable(ctx, client, plan.ServerName); err != nil {
+		return err
 	}
 	tailscaleDevices := gate.tailscaleDeviceClient(cfg.Auth.Tailscale)
 	if err := gate.ensurePersonalServerTailscaleHostAvailable(ctx, tailscaleDevices, plan.ServerName); err != nil {
@@ -680,6 +688,15 @@ func personalServerTimeoutOrContextError(ctx context.Context, waitingFor string,
 		return fmt.Errorf("timed out waiting for %s after %s", waitingFor, timeout)
 	}
 	return err
+}
+
+func (gate personalServerProvisioningGate) ensurePersonalServerNameAvailable(ctx context.Context, client personalServerCreateCloudClient, name string) error {
+	if _, found, err := client.ServerByName(ctx, name); err != nil {
+		return fmt.Errorf("check for existing Personal Server name %q: %w", name, err)
+	} else if found {
+		return fmt.Errorf("Personal Server name %q already exists in Hetzner", name)
+	}
+	return nil
 }
 
 func (gate personalServerProvisioningGate) ensurePersonalServerTailscaleHostAvailable(ctx context.Context, client personalServerTailscaleDeviceClient, host string) error {
