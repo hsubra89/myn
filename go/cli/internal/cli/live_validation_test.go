@@ -389,11 +389,30 @@ func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
 		)
 		args = append(args, command)
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", commandOutputError("ssh", output, err)
-		}
-		return string(output), nil
+		return runPersonalServerSSHCommand(cmd)
+	}
+}
+
+func TestLiveValidationSSHRunnerReturnsOnlyStdout(t *testing.T) {
+	prependFakeSSHToPath(t, `#!/bin/sh
+printf '%s\n' '{"status":"success","timestamp":"2026-05-10T12:00:00Z"}'
+printf '%s\n' 'Tailscale SSH banner on stderr' >&2
+`)
+
+	output, err := liveValidationSSHRunner(filepath.Join(t.TempDir(), "known_hosts"))(
+		context.Background(),
+		"harish",
+		"harish-personal-server",
+		"cat /var/lib/myn/personal-server-bootstrap.json",
+	)
+	if err != nil {
+		t.Fatalf("run live validation ssh: %v", err)
+	}
+	if got, want := strings.TrimSpace(output), `{"status":"success","timestamp":"2026-05-10T12:00:00Z"}`; got != want {
+		t.Fatalf("stdout mismatch: want %q, got %q", want, got)
+	}
+	if strings.Contains(output, "Tailscale SSH banner") {
+		t.Fatalf("stderr should not be returned as marker output, got %q", output)
 	}
 }
 

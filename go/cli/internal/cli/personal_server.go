@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -860,11 +861,35 @@ func defaultPersonalServerSSHRunner(ctx context.Context, user string, host strin
 	args := personalServerSSHCommandArgs(user, host, options...)
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", commandOutputError("ssh", output, err)
+	return runPersonalServerSSHCommand(cmd)
+}
+
+func runPersonalServerSSHCommand(cmd *exec.Cmd) (string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", commandOutputError("ssh", combinedCommandOutput(stdout.Bytes(), stderr.Bytes()), err)
 	}
-	return string(output), nil
+	return stdout.String(), nil
+}
+
+func combinedCommandOutput(stdout []byte, stderr []byte) []byte {
+	stdout = bytes.TrimSpace(stdout)
+	stderr = bytes.TrimSpace(stderr)
+	switch {
+	case len(stdout) == 0:
+		return stderr
+	case len(stderr) == 0:
+		return stdout
+	default:
+		output := make([]byte, 0, len(stdout)+1+len(stderr))
+		output = append(output, stdout...)
+		output = append(output, '\n')
+		output = append(output, stderr...)
+		return output
+	}
 }
 
 func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Writer, user string, host string, command string) error {

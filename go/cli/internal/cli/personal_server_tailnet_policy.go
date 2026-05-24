@@ -64,6 +64,9 @@ func planPersonalServerTailnetPolicy(rawHuJSON string, input personalServerTailn
 	if err != nil {
 		return personalServerTailnetPolicyPlan{}, err
 	}
+	if err := personalServerTailnetPolicyBroadSSHRuleError(policy, input.Identity, input.Tag, input.User); err != nil {
+		return personalServerTailnetPolicyPlan{}, err
+	}
 
 	var summary []string
 	var patchOps []personalServerTailnetPolicyPatchOperation
@@ -405,6 +408,40 @@ func personalServerTailnetPolicyHasSSHRule(policy tailscale.ACL, identity string
 		return true
 	}
 	return false
+}
+
+func personalServerTailnetPolicyBroadSSHRuleError(policy tailscale.ACL, identity string, tag string, user string) error {
+	for i, rule := range policy.SSH {
+		if !personalServerTailnetPolicySSHRuleCanGrantAccess(rule) {
+			continue
+		}
+		if !policySSHRuleDestinationsAllow(rule.Destination, tag) {
+			continue
+		}
+		if personalServerTailnetPolicySSHRuleScopeIsNarrow(rule, identity, tag, user) {
+			continue
+		}
+		return fmt.Errorf(
+			"Tailnet Policy has an existing broad Tailscale SSH rule at ssh[%d] that overlaps %s; narrow or remove that rule before provisioning",
+			i,
+			tag,
+		)
+	}
+	return nil
+}
+
+func personalServerTailnetPolicySSHRuleCanGrantAccess(rule tailscale.ACLSSH) bool {
+	return policyPrincipalMatches(rule.Action, "accept") || policyPrincipalMatches(rule.Action, personalServerTailnetPolicySSHAction)
+}
+
+func personalServerTailnetPolicySSHRuleScopeIsNarrow(rule tailscale.ACLSSH, identity string, tag string, user string) bool {
+	return policyPrincipalListExactly(rule.Source, []string{identity}) &&
+		policyPrincipalListExactly(rule.Destination, []string{tag}) &&
+		policyPrincipalListExactly(rule.Users, []string{user})
+}
+
+func policySSHRuleDestinationsAllow(values []string, tag string) bool {
+	return policyPrincipalListContains(values, tag) || policyPrincipalListContains(values, "*")
 }
 
 func appendPolicyPrincipal(values []string, value string) []string {

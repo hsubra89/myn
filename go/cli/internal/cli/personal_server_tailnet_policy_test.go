@@ -156,6 +156,89 @@ func TestPlanPersonalServerTailnetPolicyRejectsAcceptSSHRuleWithCheckPeriod(t *t
 	}
 }
 
+func TestPlanPersonalServerTailnetPolicyRejectsBroadOverlappingSSHRules(t *testing.T) {
+	tests := []struct {
+		name string
+		rule string
+	}{
+		{
+			name: "wildcard destination",
+			rule: `{
+	      "action": "check",
+	      "src": ["harish@example.test"],
+	      "dst": ["*"],
+	      "users": ["harish"],
+	      "checkPeriod": "always"
+	    }`,
+		},
+		{
+			name: "additional source",
+			rule: `{
+	      "action": "check",
+	      "src": ["harish@example.test", "group:ops"],
+	      "dst": ["tag:myn-personal-server"],
+	      "users": ["harish"],
+	      "checkPeriod": "always"
+	    }`,
+		},
+		{
+			name: "wildcard users",
+			rule: `{
+	      "action": "check",
+	      "src": ["harish@example.test"],
+	      "dst": ["tag:myn-personal-server"],
+	      "users": ["*"],
+	      "checkPeriod": "always"
+	    }`,
+		},
+		{
+			name: "additional users",
+			rule: `{
+	      "action": "accept",
+	      "src": ["harish@example.test"],
+	      "dst": ["tag:myn-personal-server"],
+	      "users": ["harish", "root"]
+	    }`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{
+	  "tagOwners": {
+	    "tag:myn-personal-server": ["harish@example.test"]
+	  },
+	  "grants": [
+	    {
+	      "src": ["harish@example.test"],
+	      "dst": ["tag:myn-personal-server"],
+	      "ip": ["tcp:22"]
+	    }
+	  ],
+	  "ssh": [` + tt.rule + `]
+	}`
+
+			_, err := planPersonalServerTailnetPolicy(raw, personalServerTailnetPolicyInput{
+				Identity: "harish@example.test",
+				User:     "harish",
+				Tag:      personalServerTailscaleTag,
+			})
+			if err == nil {
+				t.Fatal("expected broad SSH rule error")
+			}
+			for _, want := range []string{
+				"existing broad Tailscale SSH rule at ssh[0]",
+				"overlaps tag:myn-personal-server",
+				"before provisioning",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("expected error to contain %q, got %v", want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRunConfigureValidatesProposedTailnetPolicyBeforeFinalConfirmation(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))

@@ -1880,6 +1880,42 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 	}
 }
 
+func TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout(t *testing.T) {
+	prependFakeSSHToPath(t, `#!/bin/sh
+printf '%s\n' '{"status":"success","timestamp":"2026-05-10T12:00:00Z"}'
+printf '%s\n' 'Tailscale SSH check prompt belongs on stderr' >&2
+`)
+
+	output, err := defaultPersonalServerSSHRunner(context.Background(), "harish", "harish-personal-server", "cat /var/lib/myn/personal-server-bootstrap.json")
+	if err != nil {
+		t.Fatalf("run ssh: %v", err)
+	}
+	if got, want := strings.TrimSpace(output), `{"status":"success","timestamp":"2026-05-10T12:00:00Z"}`; got != want {
+		t.Fatalf("stdout mismatch: want %q, got %q", want, got)
+	}
+	if strings.Contains(output, "Tailscale SSH check prompt") {
+		t.Fatalf("stderr should not be returned as marker output, got %q", output)
+	}
+}
+
+func TestDefaultPersonalServerSSHRunnerReportsStderrOnFailure(t *testing.T) {
+	prependFakeSSHToPath(t, `#!/bin/sh
+printf '%s\n' 'partial stdout'
+printf '%s\n' 'permission denied on stderr' >&2
+exit 23
+`)
+
+	_, err := defaultPersonalServerSSHRunner(context.Background(), "harish", "harish-personal-server", "cat /var/lib/myn/personal-server-bootstrap.json")
+	if err == nil {
+		t.Fatal("expected ssh error")
+	}
+	for _, want := range []string{"partial stdout", "permission denied on stderr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got %v", want, err)
+		}
+	}
+}
+
 func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
@@ -3484,6 +3520,18 @@ func (r *fakePersonalServerSSHRunner) Run(_ context.Context, user string, host s
 	output := r.outputs[0]
 	r.outputs = r.outputs[1:]
 	return output, nil
+}
+
+func prependFakeSSHToPath(t *testing.T, script string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ssh")
+	writeTestFile(t, path, script)
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatalf("chmod fake ssh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 type fakePersonalServerMachineAuthKeyClient struct {

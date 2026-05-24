@@ -1,8 +1,3 @@
-# Review notes
-
-- Fix Personal Server bootstrap marker polling so the SSH runner captures stdout separately from stderr. `waitForPersonalServerBootstrap` parses the runner output as marker JSON, but the default and live-validation SSH runners use `CombinedOutput`, so Tailscale SSH banners or check prompts on stderr can make a successful `cat` look malformed until timeout. See `go/cli/internal/cli/personal_server.go:571`, `go/cli/internal/cli/personal_server.go:862`, and `go/cli/internal/cli/live_validation_test.go:392`.
-- Before provisioning, reject or clearly block on existing broad Tailscale SSH rules that overlap `tag:myn-personal-server` and allow users beyond the selected Personal Server User. The planner only appends the narrow Myn rule and does not detect broader effective access such as `dst:["*"]` or `users:["*"]`. See `go/cli/internal/cli/personal_server_tailnet_policy.go:82` and `go/cli/internal/cli/personal_server_tailnet_policy.go:388`.
-
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.

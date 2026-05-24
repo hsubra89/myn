@@ -185,3 +185,13 @@
 - Removed the dead Personal Server SSH identity loader and its unused provisioning-gate key/file hooks.
 - Updated Issue 14 status and acceptance criteria in `issues.md`.
 - Verified with the focused Personal Server SSH/configure tests, `go test ./internal/cli -count=1`, `go test ./...` from `go/cli`, `git diff --check`, and a source scan for removed Personal Server identity SSH command surfaces.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Changed the default and live-validation Personal Server SSH marker runners to capture stdout separately from stderr, so successful marker JSON is not polluted by Tailscale SSH banners, check prompts, or other stderr output.
+- Kept SSH failure diagnostics by including both captured stdout and stderr in command errors.
+- Changed Tailnet Policy planning to reject existing broad Tailscale SSH rules that overlap `tag:myn-personal-server` before provisioning, including wildcard destinations, wildcard users, extra users, and extra sources.
+- Added focused regression coverage for stdout-only marker SSH output, live-validation SSH output capture, stderr diagnostics on SSH failure, and broad overlapping Tailscale SSH policy rejection.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused regression tests and `go test ./...` from `go/cli`.
