@@ -54,6 +54,7 @@ type personalServerCloudInit struct {
 	DisableRoot             bool                               `yaml:"disable_root"`
 	Groups                  []string                           `yaml:"groups,omitempty"`
 	Users                   []personalServerCloudInitUser      `yaml:"users"`
+	BootCmd                 []string                           `yaml:"bootcmd,omitempty"`
 	WriteFiles              []personalServerCloudInitWriteFile `yaml:"write_files"`
 	RunCmd                  [][]string                         `yaml:"runcmd"`
 }
@@ -99,13 +100,8 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 				Passwd:     input.PasswordHash,
 			},
 		},
+		BootCmd: []string{renderPersonalServerTailscaleAuthKeyBootCommand(input.TailscaleMachineAuthKey)},
 		WriteFiles: []personalServerCloudInitWriteFile{
-			{
-				Path:        personalServerTailscaleAuthKeyPath,
-				Owner:       "root:root",
-				Permissions: "0600",
-				Content:     strings.TrimSpace(input.TailscaleMachineAuthKey) + "\n",
-			},
 			{
 				Path:        personalServerBootstrapScriptPath,
 				Owner:       "root:root",
@@ -121,6 +117,62 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 		return "", fmt.Errorf("encode Personal Server Bootstrap cloud-init: %w", err)
 	}
 	return "#cloud-config\n" + string(data), nil
+}
+
+func renderPersonalServerTailscaleAuthKeyBootCommand(machineAuthKey string) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, "set -eu")
+	fmt.Fprintf(&b, "install -d -m 0700 %s\n", shellQuote(path.Dir(personalServerTailscaleAuthKeyPath)))
+	fmt.Fprintln(&b, "umask 077")
+	fmt.Fprintf(&b, "cat >%s <<'MYN_TAILSCALE_AUTH_KEY'\n", shellQuote(personalServerTailscaleAuthKeyPath))
+	fmt.Fprintln(&b, strings.TrimSpace(machineAuthKey))
+	fmt.Fprintln(&b, "MYN_TAILSCALE_AUTH_KEY")
+	fmt.Fprintf(&b, "python3 - %s <<'PY'\n", shellQuote(personalServerTailscaleAuthKeyPath))
+	fmt.Fprint(&b, `import os
+import stat
+import sys
+
+key_path = sys.argv[1]
+try:
+    with open(key_path, "rb") as key_file:
+        secret = key_file.read().strip()
+except OSError:
+    secret = b""
+if not secret:
+    raise SystemExit(0)
+
+replacement = b"[redacted tailscale auth key]"
+roots = ["/var/lib/cloud/instances", "/var/lib/cloud/instance"]
+seen = set()
+for root in roots:
+    if not os.path.exists(root):
+        continue
+    for dirpath, _, filenames in os.walk(root):
+        for filename in filenames:
+            path = os.path.join(dirpath, filename)
+            try:
+                real_path = os.path.realpath(path)
+                if real_path in seen:
+                    continue
+                seen.add(real_path)
+                file_stat = os.stat(path)
+                if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size > 10 * 1024 * 1024:
+                    continue
+                with open(path, "rb") as candidate:
+                    data = candidate.read()
+            except OSError:
+                continue
+            if secret not in data:
+                continue
+            try:
+                with open(path, "wb") as candidate:
+                    candidate.write(data.replace(secret, replacement))
+                os.chmod(path, stat.S_IMODE(file_stat.st_mode))
+            except OSError:
+                pass
+PY
+`)
+	return b.String()
 }
 
 func validatePersonalServerBootstrapInput(input personalServerBootstrapInput) error {
@@ -267,6 +319,12 @@ cleanup_tailscale_auth_key() {
   rm -f "$MYN_TAILSCALE_AUTH_KEY_FILE" 2>/dev/null || true
 }
 
+record_partial_failure() {
+  local failure="$1"
+  echo "$failure" >&2
+  MYN_PARTIAL_FAILURES+=("$failure")
+}
+
 fail_tailscale_join() {
   local reason="$1"
   local failure="Personal Server Tailscale join failed: $reason"
@@ -329,6 +387,57 @@ brew() {
   sudo -H -u "$MYN_USER" /home/linuxbrew/.linuxbrew/bin/brew "$@"
 }
 
+github_infrastructure_reachable() {
+  local url
+  for url in \
+    https://github.com \
+    https://raw.githubusercontent.com \
+    https://codeload.github.com \
+    https://ghcr.io/v2/
+  do
+    if ! curl -4 -sSIL --connect-timeout 10 --max-time 20 -o /dev/null "$url"; then
+      return 1
+    fi
+  done
+}
+
+install_homebrew_development_tools() {
+  if ! github_infrastructure_reachable; then
+    record_partial_failure "Homebrew tools skipped: IPv4 egress to GitHub/Homebrew infrastructure is unavailable"
+    return 0
+  fi
+
+  install -d -o "$MYN_USER" -g "$MYN_USER" /home/linuxbrew/.linuxbrew
+  if [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+    if ! sudo -H -u "$MYN_USER" env NONINTERACTIVE=1 bash -lc "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+      record_partial_failure "Homebrew install failed"
+      return 0
+    fi
+  fi
+  chown -R "$MYN_USER:$MYN_USER" /home/linuxbrew/.linuxbrew
+  cat >/etc/profile.d/myn-personal-server.sh <<'PROFILE'
+export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm 2>/dev/null)/nvm.sh" ]; then
+  . "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm)/nvm.sh"
+fi
+PROFILE
+
+  if ! brew update; then
+    record_partial_failure "Homebrew update failed"
+    return 0
+  fi
+  if ! brew install "${MYN_HOMEBREW_TOOLS[@]}"; then
+    record_partial_failure "Homebrew tool install failed"
+    return 0
+  fi
+
+  if ! run_as_user_shell "eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\" && mkdir -p \"\$HOME/.nvm\" && export NVM_DIR=\"\$HOME/.nvm\" && source \"\$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm)/nvm.sh\" && nvm install --lts && nvm alias default 'lts/*' && nvm use default"; then
+    record_partial_failure "Node LTS install failed"
+  fi
+}
+
 trap mark_failed ERR`)
 }
 
@@ -382,30 +491,13 @@ apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 usermod -aG docker "$MYN_USER"
 
-install -d -o "$MYN_USER" -g "$MYN_USER" /home/linuxbrew/.linuxbrew
-if [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-  sudo -H -u "$MYN_USER" env NONINTERACTIVE=1 bash -lc "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-chown -R "$MYN_USER:$MYN_USER" /home/linuxbrew/.linuxbrew
-cat >/etc/profile.d/myn-personal-server.sh <<'PROFILE'
-export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-export NVM_DIR="$HOME/.nvm"
-if [ -s "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm 2>/dev/null)/nvm.sh" ]; then
-  . "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm)/nvm.sh"
-fi
-PROFILE
-
-brew update
-brew install "${MYN_HOMEBREW_TOOLS[@]}"
-
-run_as_user_shell "eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\" && mkdir -p \"\$HOME/.nvm\" && export NVM_DIR=\"\$HOME/.nvm\" && source \"\$(/home/linuxbrew/.linuxbrew/bin/brew --prefix nvm)/nvm.sh\" && nvm install --lts && nvm alias default 'lts/*' && nvm use default"`)
+install_homebrew_development_tools`)
 
 	if strings.TrimSpace(input.GitIdentity.Name) != "" {
-		fmt.Fprintf(b, "sudo -H -u \"$MYN_USER\" /home/linuxbrew/.linuxbrew/bin/git config --global user.name %s\n", shellQuote(input.GitIdentity.Name))
+		fmt.Fprintf(b, "if ! sudo -H -u \"$MYN_USER\" git config --global user.name %s; then\n  record_partial_failure \"Git user.name setup failed\"\nfi\n", shellQuote(input.GitIdentity.Name))
 	}
 	if strings.TrimSpace(input.GitIdentity.Email) != "" {
-		fmt.Fprintf(b, "sudo -H -u \"$MYN_USER\" /home/linuxbrew/.linuxbrew/bin/git config --global user.email %s\n", shellQuote(input.GitIdentity.Email))
+		fmt.Fprintf(b, "if ! sudo -H -u \"$MYN_USER\" git config --global user.email %s; then\n  record_partial_failure \"Git user.email setup failed\"\nfi\n", shellQuote(input.GitIdentity.Email))
 	}
 
 	for _, agent := range input.ToolPlan.CodingAgents {

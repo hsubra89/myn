@@ -70,19 +70,28 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		t.Fatalf("user should not receive authorized SSH keys, got %#v", user.SSHAuthorizedKeys)
 	}
 
+	if got, want := len(parsed.BootCmd), 1; got != want {
+		t.Fatalf("cloud-init should create the Machine Auth Key through one bootcmd: want %d, got %d", want, got)
+	}
+	authKeyBootCmd := parsed.BootCmd[0]
+	for _, want := range []string{
+		"cat >'/run/myn/tailscale-auth-key' <<'MYN_TAILSCALE_AUTH_KEY'",
+		machineAuthKey,
+		"/var/lib/cloud/instances",
+		"/var/lib/cloud/instance",
+		"[redacted tailscale auth key]",
+	} {
+		if !strings.Contains(authKeyBootCmd, want) {
+			t.Fatalf("Machine Auth Key bootcmd should contain %q:\n%s", want, authKeyBootCmd)
+		}
+	}
+	if _, ok := parsed.findWriteFile("/run/myn/tailscale-auth-key"); ok {
+		t.Fatalf("Machine Auth Key should not be written through cloud-init write_files: %#v", parsed.WriteFiles)
+	}
+
 	script := parsed.bootstrapScript()
 	if scriptFile := parsed.writeFile("/usr/local/sbin/myn-personal-server-bootstrap.sh"); scriptFile.Permissions != "0755" {
 		t.Fatalf("bootstrap script permissions mismatch: want 0755, got %#v", scriptFile)
-	}
-	authKeyFile := parsed.writeFile("/run/myn/tailscale-auth-key")
-	if got, want := authKeyFile.Permissions, "0600"; got != want {
-		t.Fatalf("Machine Auth Key file permissions mismatch: want %q, got %#v", want, authKeyFile)
-	}
-	if got, want := authKeyFile.Owner, "root:root"; got != want {
-		t.Fatalf("Machine Auth Key file owner mismatch: want %q, got %#v", want, authKeyFile)
-	}
-	if got, want := authKeyFile.Content, machineAuthKey+"\n"; got != want {
-		t.Fatalf("Machine Auth Key should be passed through root-only file content: want %q, got %q", want, got)
 	}
 	for _, want := range []string{
 		"MYN_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
@@ -108,6 +117,14 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"APT::Periodic::Unattended-Upgrade \"1\";",
 		"https://download.docker.com/linux/ubuntu",
 		"docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"github_infrastructure_reachable",
+		"https://codeload.github.com",
+		"https://ghcr.io/v2/",
+		"record_partial_failure \"Homebrew tools skipped: IPv4 egress to GitHub/Homebrew infrastructure is unavailable\"",
+		"record_partial_failure \"Homebrew install failed\"",
+		"record_partial_failure \"Homebrew update failed\"",
+		"record_partial_failure \"Homebrew tool install failed\"",
+		"install_homebrew_development_tools",
 		"brew install \"${MYN_HOMEBREW_TOOLS[@]}\"",
 		"nvm install --lts",
 		"nvm alias default 'lts/*'",
@@ -246,6 +263,7 @@ type parsedBootstrapCloudInit struct {
 	DisableRoot             bool                 `yaml:"disable_root"`
 	SSHPwAuth               bool                 `yaml:"ssh_pwauth"`
 	Users                   []bootstrapCloudUser `yaml:"users"`
+	BootCmd                 []string             `yaml:"bootcmd"`
 	WriteFiles              []bootstrapWriteFile `yaml:"write_files"`
 }
 
@@ -290,12 +308,17 @@ func (parsed parsedBootstrapCloudInit) bootstrapScript() string {
 }
 
 func (parsed parsedBootstrapCloudInit) writeFile(path string) bootstrapWriteFile {
+	writeFile, _ := parsed.findWriteFile(path)
+	return writeFile
+}
+
+func (parsed parsedBootstrapCloudInit) findWriteFile(path string) (bootstrapWriteFile, bool) {
 	for _, file := range parsed.WriteFiles {
 		if file.Path == path {
-			return file
+			return file, true
 		}
 	}
-	return bootstrapWriteFile{}
+	return bootstrapWriteFile{}, false
 }
 
 func containsString(values []string, want string) bool {

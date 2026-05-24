@@ -247,3 +247,12 @@
 - Used a focused TDD slice to first make `TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout` fail when `BatchMode=yes` is present, then removed the option while preserving ordinary `ssh`, `StrictHostKeyChecking=accept-new`, `ConnectTimeout=10`, stdout-only success output, and stderr diagnostics on failure.
 - Updated Issue 18 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./internal/cli -run TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Guarded Homebrew/GitHub-dependent bootstrap work behind an IPv4 egress check for GitHub, raw GitHub content, codeload, and GHCR; when unavailable, bootstrap now records a partial failure and can still write the success marker.
+- Moved the one-off Tailscale Machine Auth Key out of cloud-init `write_files`; cloud-init now creates the root-only `/run/myn/tailscale-auth-key` from `bootcmd` and immediately redacts persisted cloud-init user-data copies before `tailscale up`.
+- Changed bootstrap marker waiting to run the marker poll loop inside one check-aware Tailscale SSH session instead of opening a new SSH session for every poll.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused bootstrap/provisioning regression tests and `go test ./...` from `go/cli`.

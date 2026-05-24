@@ -579,30 +579,45 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	lastFailure := ""
-	for {
-		output, err := runner(pollCtx, out, user, host, "cat "+personalServerBootstrapMarkerPath)
-		if err == nil {
-			marker, parseErr := parsePersonalServerBootstrapMarker(output)
-			if parseErr == nil {
-				return marker, nil
-			}
-		} else {
-			writePersonalServerSSHReachabilityFailure(out, err, &lastFailure)
-		}
-		if err := ctx.Err(); err != nil {
-			return personalServerBootstrapMarker{}, err
+	output, err := runner(pollCtx, out, user, host, personalServerBootstrapMarkerPollCommand(gate.personalServerSSHPollInterval()))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return personalServerBootstrapMarker{}, ctxErr
 		}
 		if pollCtx.Err() != nil {
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
-		if err := gate.personalServerSleep(pollCtx, gate.personalServerSSHPollInterval()); err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return personalServerBootstrapMarker{}, ctxErr
-			}
-			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
-		}
+		return personalServerBootstrapMarker{}, err
 	}
+	return parsePersonalServerBootstrapMarker(output)
+}
+
+func personalServerBootstrapMarkerPollCommand(interval time.Duration) string {
+	sleepSeconds := interval.Seconds()
+	if sleepSeconds <= 0 {
+		sleepSeconds = defaultPersonalServerSSHPollWait.Seconds()
+	}
+	return fmt.Sprintf(`python3 - %s %s <<'PY'
+import json
+import pathlib
+import sys
+import time
+
+marker_path = pathlib.Path(sys.argv[1])
+sleep_seconds = float(sys.argv[2])
+while True:
+    try:
+        marker = marker_path.read_text(encoding="utf-8")
+        payload = json.loads(marker)
+        if str(payload.get("status", "")).strip():
+            print(marker, end="" if marker.endswith("\n") else "\n")
+            raise SystemExit(0)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    time.sleep(sleep_seconds)
+PY`, shellQuote(personalServerBootstrapMarkerPath), shellQuote(strconv.FormatFloat(sleepSeconds, 'f', -1, 64)))
 }
 
 func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleAccess(ctx context.Context, out io.Writer, client personalServerTailscaleDeviceClient, plan personalServerCreationPlan) error {

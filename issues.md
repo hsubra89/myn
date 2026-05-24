@@ -1,9 +1,3 @@
-# Review notes
-
-- `go/cli/internal/cli/personal_server_bootstrap.go:387` still depends on Homebrew/GitHub infrastructure during bootstrap. Newly created Personal Servers are public IPv6-only, while `github.com`, `codeload.github.com`, and `ghcr.io` currently lack native IPv6 here, so bootstrap can fail before writing the success marker.
-- `go/cli/internal/cli/personal_server_bootstrap.go:107` writes the one-off Tailscale Machine Auth Key into cloud-init `write_files`. Cloud-init can persist rendered user-data under `/var/lib/cloud/instances/...`, leaving the key on disk during its lifetime or after a failed join.
-- `go/cli/internal/cli/personal_server.go:584` opens a fresh Tailscale SSH session for every bootstrap marker poll. With the generated SSH policy using `checkPeriod: "always"`, this can require repeated browser approvals; poll for the marker inside one remote SSH session.
-
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.

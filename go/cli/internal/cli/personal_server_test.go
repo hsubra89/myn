@@ -1913,7 +1913,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 
 	if got, want := ssh.calls, []personalServerSSHCall{
 		{user: "harish", host: "harish-personal-server", command: "true"},
-		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: personalServerBootstrapMarkerPollCommand(defaultPersonalServerSSHPollWait)},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1969,7 +1969,6 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 	ssh := &fakePersonalServerSSHRunner{
 		errors: []error{
 			nil,
-			errors.New("marker not ready"),
 			nil,
 		},
 		outputs: []string{
@@ -2023,8 +2022,7 @@ func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 
 	if got, want := ssh.calls, []personalServerSSHCall{
 		{user: "harish", host: "harish-personal-server", command: "true"},
-		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: personalServerBootstrapMarkerPollCommand(defaultPersonalServerSSHPollWait)},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -2146,11 +2144,25 @@ func TestWaitForPersonalServerBootstrapUsesCheckAwareTailscaleSSHRunner(t *testi
 	if got, want := marker.Status, "success"; got != want {
 		t.Fatalf("marker status mismatch: want %q, got %q", want, got)
 	}
-	if got, want := calls, []personalServerSSHCall{{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"}}; !reflect.DeepEqual(got, want) {
+	if got, want := calls, []personalServerSSHCall{{user: "harish", host: "harish-personal-server", command: personalServerBootstrapMarkerPollCommand(defaultPersonalServerSSHPollWait)}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
 	if !strings.Contains(out.String(), "https://login.tailscale.com/a/check") {
 		t.Fatalf("expected check URL to be surfaced, got %q", out.String())
+	}
+}
+
+func TestPersonalServerBootstrapMarkerPollCommandWaitsRemotely(t *testing.T) {
+	command := personalServerBootstrapMarkerPollCommand(3 * time.Second)
+	for _, want := range []string{
+		"python3 - '/var/lib/myn/personal-server-bootstrap.json' '3' <<'PY'",
+		"while True:",
+		"json.loads(marker)",
+		"time.sleep(sleep_seconds)",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("marker poll command should contain %q:\n%s", want, command)
+		}
 	}
 }
 
@@ -2170,7 +2182,6 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 		errors: []error{
 			errors.New("connection refused"),
 			nil,
-			errors.New("connection reset during reboot"),
 			nil,
 		},
 		outputs: []string{
@@ -2225,8 +2236,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	if got, want := ssh.calls, []personalServerSSHCall{
 		{user: "harish", host: "harish-personal-server", command: "true"},
 		{user: "harish", host: "harish-personal-server", command: "true"},
-		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{user: "harish", host: "harish-personal-server", command: personalServerBootstrapMarkerPollCommand(defaultPersonalServerSSHPollWait)},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -2333,10 +2343,6 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 		t.Fatalf("seed config: %v", err)
 	}
 
-	ssh := &fakePersonalServerSSHRunner{
-		errors:  []error{nil, errors.New("marker not ready")},
-		outputs: []string{"ready\n"},
-	}
 	var out bytes.Buffer
 	err := runConfigure(&out, configureOptions{
 		localRoot:          "projects",
@@ -2368,7 +2374,13 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH:           ssh.Run,
+			runSSH: func(ctx context.Context, _ string, _ string, command string) (string, error) {
+				if command == "true" {
+					return "ready\n", nil
+				}
+				<-ctx.Done()
+				return "", ctx.Err()
+			},
 			bootstrapTimeout: time.Nanosecond,
 			sleep: func(ctx context.Context, _ time.Duration) error {
 				<-ctx.Done()
