@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1913,6 +1914,64 @@ exit 23
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}
+	}
+}
+
+func TestDefaultPersonalServerTailscaleSSHRunnerIsCheckAwareAndReturnsOnlyStdout(t *testing.T) {
+	prependFakeSSHToPath(t, `#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "BatchMode=yes" ]; then
+		printf '%s\n' 'unexpected BatchMode option' >&2
+		exit 31
+	fi
+done
+printf '%s\n' '{"status":"success","timestamp":"2026-05-10T12:00:00Z"}'
+printf '%s\n' 'Open this URL to approve Tailscale SSH: https://login.tailscale.com/a/check' >&2
+`)
+
+	var out bytes.Buffer
+	output, err := defaultPersonalServerTailscaleSSHCheckRunner(context.Background(), &out, "harish", "harish-personal-server", "cat /var/lib/myn/personal-server-bootstrap.json")
+	if err != nil {
+		t.Fatalf("run ssh: %v", err)
+	}
+	if got, want := strings.TrimSpace(output), `{"status":"success","timestamp":"2026-05-10T12:00:00Z"}`; got != want {
+		t.Fatalf("stdout mismatch: want %q, got %q", want, got)
+	}
+	if strings.Contains(output, "Tailscale SSH") {
+		t.Fatalf("stderr should not be returned as marker output, got %q", output)
+	}
+	if !strings.Contains(out.String(), "https://login.tailscale.com/a/check") {
+		t.Fatalf("stderr should be surfaced to the user, got %q", out.String())
+	}
+}
+
+func TestWaitForPersonalServerBootstrapUsesCheckAwareTailscaleSSHRunner(t *testing.T) {
+	var calls []personalServerSSHCall
+	gate := personalServerProvisioningGate{
+		runSSH: func(context.Context, string, string, string) (string, error) {
+			t.Fatal("bootstrap marker polling should use the Tailscale SSH runner")
+			return "", nil
+		},
+		runTailscaleSSHCheck: func(_ context.Context, out io.Writer, user string, host string, command string) (string, error) {
+			calls = append(calls, personalServerSSHCall{user: user, host: host, command: command})
+			fmt.Fprintln(out, "Open this URL to approve Tailscale SSH: https://login.tailscale.com/a/check")
+			return `{"status":"success","timestamp":"2026-05-10T12:00:00Z"}`, nil
+		},
+	}
+
+	var out bytes.Buffer
+	marker, err := gate.waitForPersonalServerBootstrap(context.Background(), &out, "harish", "harish-personal-server")
+	if err != nil {
+		t.Fatalf("wait for bootstrap marker: %v", err)
+	}
+	if got, want := marker.Status, "success"; got != want {
+		t.Fatalf("marker status mismatch: want %q, got %q", want, got)
+	}
+	if got, want := calls, []personalServerSSHCall{{user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
+	}
+	if !strings.Contains(out.String(), "https://login.tailscale.com/a/check") {
+		t.Fatalf("expected check URL to be surfaced, got %q", out.String())
 	}
 }
 

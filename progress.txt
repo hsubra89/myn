@@ -211,3 +211,13 @@
 - Added coverage that duplicate Hetzner server names and duplicate Tailscale Hosts fail before Tailnet Policy reads, validation, browser opening, policy-edit prompts, Machine Auth Key creation, or cloud resource creation.
 - Updated Issue 15 status and acceptance criteria in `issues.md`.
 - Verified with focused duplicate-conflict tests, `go test ./internal/cli -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Changed Personal Server bootstrap marker polling to use the same check-aware Tailscale SSH runner as reachability checks, without `BatchMode=yes`, while still keeping marker JSON stdout separate from stderr and surfacing Tailscale check URLs.
+- Updated the live-validation SSH runner to use the same check-aware path for provisioning and post-provisioning SSH checks.
+- Tightened Tailnet Policy SSH rule safety so exact-scope `accept` rules and exact-scope `check` rules without `checkPeriod: "always"` are rejected before provisioning instead of being left beside a newly appended rule.
+- Changed post-confirmation Tailnet Policy apply to abort when the re-read plan differs from the accepted preview, preventing unreviewed concurrent policy mutations.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused SSH and Tailnet Policy regression tests, `go test ./...` from `go/cli`, and `git diff --check`.

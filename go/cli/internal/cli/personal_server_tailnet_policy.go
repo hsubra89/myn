@@ -171,6 +171,9 @@ func (gate personalServerProvisioningGate) applyTailnetPolicyForPersonalServer(c
 	if err != nil {
 		return err
 	}
+	if !personalServerTailnetPolicyPlansMatch(acceptedPlan, plan) {
+		return fmt.Errorf("Tailnet Policy changed after preview; rerun configure so Myn can review the updated policy")
+	}
 	if !plan.NeedsChanges {
 		if err := client.ValidatePolicy(ctx, plan.ProposedHuJSON); err != nil {
 			return fmt.Errorf("re-validate current Tailnet Policy before apply: %w", err)
@@ -187,6 +190,21 @@ func (gate personalServerProvisioningGate) applyTailnetPolicyForPersonalServer(c
 		return fmt.Errorf("apply Tailnet Policy: %w", err)
 	}
 	return nil
+}
+
+func personalServerTailnetPolicyPlansMatch(acceptedPlan personalServerTailnetPolicyPlan, currentPlan personalServerTailnetPolicyPlan) bool {
+	if acceptedPlan.NeedsChanges != currentPlan.NeedsChanges {
+		return false
+	}
+	if len(acceptedPlan.Summary) != len(currentPlan.Summary) {
+		return false
+	}
+	for i := range acceptedPlan.Summary {
+		if acceptedPlan.Summary[i] != currentPlan.Summary[i] {
+			return false
+		}
+	}
+	return strings.TrimSpace(acceptedPlan.ProposedHuJSON) == strings.TrimSpace(currentPlan.ProposedHuJSON)
 }
 
 func (gate personalServerProvisioningGate) tailnetPolicyClient(cfg tailscaleConfig) personalServerTailnetPolicyClient {
@@ -422,7 +440,7 @@ func personalServerTailnetPolicyBroadSSHRuleError(policy tailscale.ACL, identity
 			continue
 		}
 		return fmt.Errorf(
-			"Tailnet Policy has an existing broad Tailscale SSH rule at ssh[%d] that overlaps %s; narrow or remove that rule before provisioning",
+			"Tailnet Policy has an existing unsafe Tailscale SSH rule at ssh[%d] that overlaps %s; require action check with checkPeriod always and narrow src/dst/users, or remove that rule before provisioning",
 			i,
 			tag,
 		)
@@ -435,7 +453,9 @@ func personalServerTailnetPolicySSHRuleCanGrantAccess(rule tailscale.ACLSSH) boo
 }
 
 func personalServerTailnetPolicySSHRuleScopeIsNarrow(rule tailscale.ACLSSH, identity string, tag string, user string) bool {
-	return policyPrincipalListExactly(rule.Source, []string{identity}) &&
+	return policyPrincipalMatches(rule.Action, personalServerTailnetPolicySSHAction) &&
+		rule.CheckPeriod == tailscale.CheckPeriodAlways &&
+		policyPrincipalListExactly(rule.Source, []string{identity}) &&
 		policyPrincipalListExactly(rule.Destination, []string{tag}) &&
 		policyPrincipalListExactly(rule.Users, []string{user})
 }

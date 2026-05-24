@@ -517,7 +517,7 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	}
 
 	fmt.Fprintln(out, "Waiting for Personal Server Bootstrap marker.")
-	marker, err := gate.waitForPersonalServerBootstrap(ctx, plan.User, plan.ServerName)
+	marker, err := gate.waitForPersonalServerBootstrap(ctx, out, plan.User, plan.ServerName)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
 		writePersonalServerInspectionHint(out, plan, server)
@@ -553,7 +553,7 @@ const (
 
 type personalServerSSHRunner func(ctx context.Context, user string, host string, command string) (string, error)
 
-type personalServerTailscaleSSHCheckRunner func(ctx context.Context, out io.Writer, user string, host string, command string) error
+type personalServerTailscaleSSHCheckRunner func(ctx context.Context, out io.Writer, user string, host string, command string) (string, error)
 
 type personalServerBootstrapMarker struct {
 	Status             string            `json:"status"`
@@ -565,24 +565,27 @@ type personalServerBootstrapMarker struct {
 	SkippedGitIdentity []string          `json:"skippedGitIdentity"`
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, user string, host string) (personalServerBootstrapMarker, error) {
+func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, out io.Writer, user string, host string) (personalServerBootstrapMarker, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no saved Tailscale Host")
 	}
 
-	runner := gate.personalServerSSHRunner()
+	runner := gate.personalServerTailscaleSSHCheckRunner()
 	timeout := gate.personalServerBootstrapTimeout()
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	lastFailure := ""
 	for {
-		output, err := runner(pollCtx, user, host, "cat "+personalServerBootstrapMarkerPath)
+		output, err := runner(pollCtx, out, user, host, "cat "+personalServerBootstrapMarkerPath)
 		if err == nil {
 			marker, parseErr := parsePersonalServerBootstrapMarker(output)
 			if parseErr == nil {
 				return marker, nil
 			}
+		} else {
+			writePersonalServerSSHReachabilityFailure(out, err, &lastFailure)
 		}
 		if err := ctx.Err(); err != nil {
 			return personalServerBootstrapMarker{}, err
@@ -647,7 +650,7 @@ func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(
 	waitingFor := fmt.Sprintf("Tailscale SSH reachability to %s@%s", strings.TrimSpace(user), strings.TrimSpace(host))
 	lastFailure := ""
 	for {
-		if err := runner(ctx, out, user, host, "true"); err == nil {
+		if _, err := runner(ctx, out, user, host, "true"); err == nil {
 			return nil
 		} else {
 			writePersonalServerSSHReachabilityFailure(out, err, &lastFailure)
@@ -855,15 +858,15 @@ func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner
 		return gate.runTailscaleSSHCheck
 	}
 	if gate.runSSH != nil {
-		return func(ctx context.Context, _ io.Writer, user string, host string, command string) error {
+		return func(ctx context.Context, _ io.Writer, user string, host string, command string) (string, error) {
 			output, err := gate.runSSH(ctx, user, host, command)
 			if err == nil {
-				return nil
+				return output, nil
 			}
 			if strings.TrimSpace(output) != "" {
-				return commandOutputError("ssh", []byte(output), err)
+				return output, commandOutputError("ssh", []byte(output), err)
 			}
-			return err
+			return output, err
 		}
 	}
 	return defaultPersonalServerTailscaleSSHCheckRunner
@@ -909,7 +912,7 @@ func combinedCommandOutput(stdout []byte, stderr []byte) []byte {
 	}
 }
 
-func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Writer, user string, host string, command string) error {
+func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Writer, user string, host string, command string) (string, error) {
 	if out == nil {
 		out = io.Discard
 	}
@@ -921,12 +924,21 @@ func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Wr
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = out
-	cmd.Stderr = out
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ssh: %w", err)
+	return runPersonalServerTailscaleSSHCommand(cmd, out)
+}
+
+func runPersonalServerTailscaleSSHCommand(cmd *exec.Cmd, stderrOut io.Writer) (string, error) {
+	if stderrOut == nil {
+		stderrOut = io.Discard
 	}
-	return nil
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.MultiWriter(&stderr, stderrOut)
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), commandOutputError("ssh", combinedCommandOutput(stdout.Bytes(), stderr.Bytes()), err)
+	}
+	return stdout.String(), nil
 }
 
 func (gate personalServerProvisioningGate) personalServerBootstrapTimeout() time.Duration {

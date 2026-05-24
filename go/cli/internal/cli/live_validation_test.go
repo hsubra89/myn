@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -229,8 +230,8 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 			openURL: func(string) error {
 				return nil
 			},
-			runSSH:           liveValidationSSHRunner(knownHostsPath),
-			bootstrapTimeout: liveValidationBootstrapLimit,
+			runTailscaleSSHCheck: liveValidationTailscaleSSHRunner(knownHostsPath),
+			bootstrapTimeout:     liveValidationBootstrapLimit,
 			currentUsername: func() string {
 				return liveValidationUser
 			},
@@ -376,31 +377,33 @@ func liveValidationHcloudClient(token string) *hcloud.Client {
 	)
 }
 
-func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
-	return func(ctx context.Context, user string, host string, command string) (string, error) {
+func liveValidationTailscaleSSHRunner(knownHostsPath string) personalServerTailscaleSSHCheckRunner {
+	return func(ctx context.Context, out io.Writer, user string, host string, command string) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
 			return "", fmt.Errorf("create isolated SSH known_hosts directory: %w", err)
 		}
 		args := personalServerSSHCommandArgs(user, host,
-			"-o", "BatchMode=yes",
 			"-o", "StrictHostKeyChecking=accept-new",
 			"-o", "UserKnownHostsFile="+knownHostsPath,
 			"-o", "ConnectTimeout=10",
 		)
 		args = append(args, command)
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		return runPersonalServerSSHCommand(cmd)
+		cmd.Stdin = os.Stdin
+		return runPersonalServerTailscaleSSHCommand(cmd, out)
 	}
 }
 
-func TestLiveValidationSSHRunnerReturnsOnlyStdout(t *testing.T) {
+func TestLiveValidationTailscaleSSHRunnerReturnsOnlyStdout(t *testing.T) {
 	prependFakeSSHToPath(t, `#!/bin/sh
 printf '%s\n' '{"status":"success","timestamp":"2026-05-10T12:00:00Z"}'
 printf '%s\n' 'Tailscale SSH banner on stderr' >&2
 `)
 
-	output, err := liveValidationSSHRunner(filepath.Join(t.TempDir(), "known_hosts"))(
+	var out bytes.Buffer
+	output, err := liveValidationTailscaleSSHRunner(filepath.Join(t.TempDir(), "known_hosts"))(
 		context.Background(),
+		&out,
 		"harish",
 		"harish-personal-server",
 		"cat /var/lib/myn/personal-server-bootstrap.json",
@@ -413,6 +416,9 @@ printf '%s\n' 'Tailscale SSH banner on stderr' >&2
 	}
 	if strings.Contains(output, "Tailscale SSH banner") {
 		t.Fatalf("stderr should not be returned as marker output, got %q", output)
+	}
+	if !strings.Contains(out.String(), "Tailscale SSH banner") {
+		t.Fatalf("stderr should be surfaced to the user, got %q", out.String())
 	}
 }
 
@@ -712,7 +718,7 @@ func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHos
 
 func liveValidationSSH(t *testing.T, ctx context.Context, knownHostsPath string, user string, host string, command string) string {
 	t.Helper()
-	output, err := liveValidationSSHRunner(knownHostsPath)(ctx, user, host, command)
+	output, err := liveValidationTailscaleSSHRunner(knownHostsPath)(ctx, io.Discard, user, host, command)
 	if err != nil {
 		t.Fatalf("run live SSH command as %s: %v", user, err)
 	}

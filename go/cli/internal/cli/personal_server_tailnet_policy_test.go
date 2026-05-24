@@ -114,8 +114,45 @@ func TestPlanPersonalServerTailnetPolicyReportsIndividualMissingPieces(t *testin
 	}
 }
 
-func TestPlanPersonalServerTailnetPolicyRejectsAcceptSSHRuleWithCheckPeriod(t *testing.T) {
-	raw := `{
+func TestPlanPersonalServerTailnetPolicyRejectsExactScopeSSHRuleWithoutRequiredChecks(t *testing.T) {
+	tests := []struct {
+		name string
+		rule string
+	}{
+		{
+			name: "accept action",
+			rule: `{
+      "action": "accept",
+      "src": ["harish@example.test"],
+      "dst": ["tag:myn-personal-server"],
+      "users": ["harish"],
+      "checkPeriod": "always"
+    }`,
+		},
+		{
+			name: "check action without always check period",
+			rule: `{
+      "action": "check",
+      "src": ["harish@example.test"],
+      "dst": ["tag:myn-personal-server"],
+      "users": ["harish"],
+      "checkPeriod": "24h"
+    }`,
+		},
+		{
+			name: "check action without check period",
+			rule: `{
+      "action": "check",
+      "src": ["harish@example.test"],
+      "dst": ["tag:myn-personal-server"],
+      "users": ["harish"]
+    }`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{
   "tagOwners": {
     "tag:myn-personal-server": ["harish@example.test"]
   },
@@ -126,33 +163,27 @@ func TestPlanPersonalServerTailnetPolicyRejectsAcceptSSHRuleWithCheckPeriod(t *t
       "ip": ["tcp:22"]
     }
   ],
-  "ssh": [
-    {
-      "action": "accept",
-      "src": ["harish@example.test"],
-      "dst": ["tag:myn-personal-server"],
-      "users": ["harish"],
-      "checkPeriod": "always"
-    }
-  ]
+  "ssh": [` + tt.rule + `]
 }`
 
-	plan, err := planPersonalServerTailnetPolicy(raw, personalServerTailnetPolicyInput{
-		Identity: "harish@example.test",
-		User:     "harish",
-		Tag:      personalServerTailscaleTag,
-	})
-	if err != nil {
-		t.Fatalf("plan policy: %v", err)
-	}
-	if !plan.NeedsChanges {
-		t.Fatal("accept SSH rule should not be sufficient because checkPeriod requires action check")
-	}
-	if got, want := plan.Summary, []string{"Allow harish@example.test to Tailscale SSH to tag:myn-personal-server as harish with checkPeriod always."}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("summary mismatch: want %#v, got %#v", want, got)
-	}
-	if !strings.Contains(plan.ProposedHuJSON, `"action": "check"`) {
-		t.Fatalf("proposed policy should add action check SSH rule:\n%s", plan.ProposedHuJSON)
+			_, err := planPersonalServerTailnetPolicy(raw, personalServerTailnetPolicyInput{
+				Identity: "harish@example.test",
+				User:     "harish",
+				Tag:      personalServerTailscaleTag,
+			})
+			if err == nil {
+				t.Fatal("expected overlapping SSH rule error")
+			}
+			for _, want := range []string{
+				"existing unsafe Tailscale SSH rule at ssh[0]",
+				"overlaps tag:myn-personal-server",
+				"before provisioning",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("expected error to contain %q, got %v", want, err)
+				}
+			}
+		})
 	}
 }
 
@@ -227,7 +258,7 @@ func TestPlanPersonalServerTailnetPolicyRejectsBroadOverlappingSSHRules(t *testi
 				t.Fatal("expected broad SSH rule error")
 			}
 			for _, want := range []string{
-				"existing broad Tailscale SSH rule at ssh[0]",
+				"existing unsafe Tailscale SSH rule at ssh[0]",
 				"overlaps tag:myn-personal-server",
 				"before provisioning",
 			} {
@@ -729,6 +760,45 @@ func TestRunConfigureReReadsNoopTailnetPolicyAfterFinalConfirmation(t *testing.T
 	}
 }
 
+func TestApplyTailnetPolicyAbortsWhenReReadPlanDiffersFromAcceptedPreview(t *testing.T) {
+	input := personalServerTailnetPolicyInput{
+		Identity: "harish",
+		User:     "harish",
+		Tag:      personalServerTailscaleTag,
+	}
+	acceptedPlan, err := planPersonalServerTailnetPolicy(`{}`, input)
+	if err != nil {
+		t.Fatalf("plan accepted policy: %v", err)
+	}
+	changedPolicy := `{
+  "tagOwners": {"tag:myn-personal-server": ["harish"]}
+}`
+	policy := &fakePersonalServerTailnetPolicyClient{
+		rawPolicy: changedPolicy,
+		rawETag:   "etag-after-concurrent-edit",
+	}
+	gate := personalServerProvisioningGate{
+		tailnetPolicyEnabled: true,
+		newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
+			return policy
+		},
+	}
+
+	err = gate.applyTailnetPolicyForPersonalServer(context.Background(), tailscaleConfig{}, input, acceptedPlan)
+	if err == nil {
+		t.Fatal("expected Tailnet Policy preview mismatch")
+	}
+	if !strings.Contains(err.Error(), "Tailnet Policy changed after preview") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(policy.validatedPolicies) != 0 {
+		t.Fatalf("changed re-read plan should not be validated as accepted: %#v", policy.validatedPolicies)
+	}
+	if len(policy.appliedPolicies) != 0 {
+		t.Fatalf("changed re-read plan should not be applied: %#v", policy.appliedPolicies)
+	}
+}
+
 func TestApplyTailnetPolicyReReadsAndValidatesNoopPlan(t *testing.T) {
 	raw := `{
   "tagOwners": {"tag:myn-personal-server": ["harish"]},
@@ -745,15 +815,17 @@ func TestApplyTailnetPolicyReReadsAndValidatesNoopPlan(t *testing.T) {
 			return policy
 		},
 	}
-
-	err := gate.applyTailnetPolicyForPersonalServer(context.Background(), tailscaleConfig{}, personalServerTailnetPolicyInput{
+	input := personalServerTailnetPolicyInput{
 		Identity: "harish",
 		User:     "harish",
 		Tag:      personalServerTailscaleTag,
-	}, personalServerTailnetPolicyPlan{
-		NeedsChanges:   false,
-		ProposedHuJSON: raw,
-	})
+	}
+	acceptedPlan, err := planPersonalServerTailnetPolicy(raw, input)
+	if err != nil {
+		t.Fatalf("plan accepted no-op policy: %v", err)
+	}
+
+	err = gate.applyTailnetPolicyForPersonalServer(context.Background(), tailscaleConfig{}, input, acceptedPlan)
 	if err != nil {
 		t.Fatalf("apply no-op policy: %v", err)
 	}
