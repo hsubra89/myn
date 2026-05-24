@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	tailscale "tailscale.com/client/tailscale/v2"
+	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
 )
@@ -40,6 +41,47 @@ func TestPersonalServerLocalTailscaleStatusFromIPN(t *testing.T) {
 		MagicDNSSuffix: "example.ts.net",
 		Identity:       "harish@example.test",
 		SelfNodeID:     "n123456CNTRL",
+	}
+	if got != want {
+		t.Fatalf("status mismatch: want %#v, got %#v", want, got)
+	}
+}
+
+func TestPersonalServerLocalTailscaleStatusFillsIdentityFromCurrentProfile(t *testing.T) {
+	status := &ipnstate.Status{
+		BackendState: tailscaleBackendStateRunning,
+		CurrentTailnet: &ipnstate.TailnetStatus{
+			Name:           "warptech.xyz",
+			MagicDNSSuffix: "tailc7d9e4.ts.net",
+		},
+		Self: &ipnstate.PeerStatus{
+			ID:     tailcfg.StableNodeID("nUpZVdmbmM11CNTRL"),
+			UserID: tailcfg.UserID(6953217514627532),
+		},
+	}
+
+	got := personalServerLocalTailscaleStatusFromIPN(status)
+	got.fillFromLoginProfile(ipn.LoginProfile{
+		Name: "harish@warptech.xyz",
+		UserProfile: tailcfg.UserProfile{
+			ID:          tailcfg.UserID(6953217514627532),
+			LoginName:   "harish@warptech.xyz",
+			DisplayName: "Harish Subramanium",
+		},
+		NetworkProfile: ipn.NetworkProfile{
+			MagicDNSName: "tailc7d9e4.ts.net",
+			DomainName:   "warptech.xyz",
+			DisplayName:  "warptech.xyz",
+		},
+		NodeID: tailcfg.StableNodeID("nUpZVdmbmM11CNTRL"),
+	})
+
+	want := personalServerLocalTailscaleStatus{
+		BackendState:   tailscaleBackendStateRunning,
+		TailnetName:    "warptech.xyz",
+		MagicDNSSuffix: "tailc7d9e4.ts.net",
+		Identity:       "harish@warptech.xyz",
+		SelfNodeID:     "nUpZVdmbmM11CNTRL",
 	}
 	if got != want {
 		t.Fatalf("status mismatch: want %#v, got %#v", want, got)

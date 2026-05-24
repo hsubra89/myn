@@ -9,6 +9,7 @@ import (
 
 	"tailscale.com/client/local"
 	tailscale "tailscale.com/client/tailscale/v2"
+	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 )
 
@@ -91,7 +92,16 @@ func (client personalServerLocalAPIClient) Status(ctx context.Context) (personal
 	if err != nil {
 		return personalServerLocalTailscaleStatus{}, err
 	}
-	return personalServerLocalTailscaleStatusFromIPN(status), nil
+	out := personalServerLocalTailscaleStatusFromIPN(status)
+	if strings.TrimSpace(out.Identity) != "" || strings.TrimSpace(out.BackendState) != tailscaleBackendStateRunning {
+		return out, nil
+	}
+	profile, _, err := localClient.ProfileStatus(ctx)
+	if err != nil {
+		return personalServerLocalTailscaleStatus{}, err
+	}
+	out.fillFromLoginProfile(profile)
+	return out, nil
 }
 
 func personalServerLocalTailscaleStatusFromIPN(status *ipnstate.Status) personalServerLocalTailscaleStatus {
@@ -116,6 +126,40 @@ func personalServerLocalTailscaleStatusFromIPN(status *ipnstate.Status) personal
 		}
 	}
 	return out
+}
+
+func firstNonBlankString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func (status *personalServerLocalTailscaleStatus) fillFromLoginProfile(profile ipn.LoginProfile) {
+	if status == nil {
+		return
+	}
+	if strings.TrimSpace(status.Identity) == "" {
+		status.Identity = firstNonBlankString(
+			profile.UserProfile.LoginName,
+			profile.UserProfile.DisplayName,
+			profile.Name,
+		)
+	}
+	if strings.TrimSpace(status.SelfNodeID) == "" {
+		status.SelfNodeID = strings.TrimSpace(string(profile.NodeID))
+	}
+	if strings.TrimSpace(status.TailnetName) == "" {
+		status.TailnetName = firstNonBlankString(
+			profile.NetworkProfile.DisplayName,
+			profile.NetworkProfile.DomainName,
+		)
+	}
+	if strings.TrimSpace(status.MagicDNSSuffix) == "" {
+		status.MagicDNSSuffix = strings.TrimSpace(profile.NetworkProfile.MagicDNSName)
+	}
 }
 
 func (client personalServerTailscaleAPIClient) TailnetContainsNodeID(ctx context.Context, nodeID string) (bool, error) {
