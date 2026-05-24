@@ -46,6 +46,20 @@ func (fn personalServerTailscaleCloudClientFunc) TailnetContainsNodeID(ctx conte
 	return fn(ctx, nodeID)
 }
 
+type personalServerTailscaleDevice struct {
+	ID                 string
+	NodeID             string
+	Name               string
+	Hostname           string
+	Tags               []string
+	Authorized         bool
+	ConnectedToControl bool
+}
+
+type personalServerTailscaleDeviceClient interface {
+	Devices(ctx context.Context) ([]personalServerTailscaleDevice, error)
+}
+
 type personalServerTailscaleMachineAuthKey struct {
 	Key string
 }
@@ -126,6 +140,31 @@ func (client personalServerTailscaleAPIClient) TailnetContainsNodeID(ctx context
 		}
 	}
 	return false, nil
+}
+
+func (client personalServerTailscaleAPIClient) Devices(ctx context.Context) ([]personalServerTailscaleDevice, error) {
+	cloudClient := client.client
+	if cloudClient == nil {
+		return nil, fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	devices, err := cloudClient.Devices().List(ctx)
+	if err != nil {
+		return nil, mapTailscaleValidationError(ctx, "Tailscale device listing", err)
+	}
+
+	result := make([]personalServerTailscaleDevice, 0, len(devices))
+	for _, device := range devices {
+		result = append(result, personalServerTailscaleDevice{
+			ID:                 strings.TrimSpace(device.ID),
+			NodeID:             strings.TrimSpace(device.NodeID),
+			Name:               strings.TrimSpace(device.Name),
+			Hostname:           strings.TrimSpace(device.Hostname),
+			Tags:               append([]string(nil), device.Tags...),
+			Authorized:         device.Authorized,
+			ConnectedToControl: device.ConnectedToControl,
+		})
+	}
+	return result, nil
 }
 
 func (client personalServerTailscaleAPIClient) ReadPolicy(ctx context.Context) (personalServerTailnetPolicy, error) {
@@ -292,12 +331,32 @@ func (gate personalServerProvisioningGate) tailscaleMachineAuthKeyClient(cfg tai
 	return personalServerTailscaleMachineAuthKeyErrorClient{err: fmt.Errorf("Tailscale cloud client cannot create Machine Auth Keys")}
 }
 
+func (gate personalServerProvisioningGate) tailscaleDeviceClient(cfg tailscaleConfig) personalServerTailscaleDeviceClient {
+	if gate.newTailscaleDeviceClient != nil {
+		return gate.newTailscaleDeviceClient(cfg)
+	}
+	if cloudClient := gate.tailscaleCloudClient(cfg); cloudClient != nil {
+		if deviceClient, ok := cloudClient.(personalServerTailscaleDeviceClient); ok {
+			return deviceClient
+		}
+	}
+	return personalServerTailscaleDeviceErrorClient{err: fmt.Errorf("Tailscale cloud client cannot list devices")}
+}
+
 type personalServerTailscaleMachineAuthKeyErrorClient struct {
 	err error
 }
 
 func (client personalServerTailscaleMachineAuthKeyErrorClient) CreateMachineAuthKey(context.Context, personalServerTailscaleMachineAuthKeyInput) (personalServerTailscaleMachineAuthKey, error) {
 	return personalServerTailscaleMachineAuthKey{}, client.err
+}
+
+type personalServerTailscaleDeviceErrorClient struct {
+	err error
+}
+
+func (client personalServerTailscaleDeviceErrorClient) Devices(context.Context) ([]personalServerTailscaleDevice, error) {
+	return nil, client.err
 }
 
 func personalServerTailnetNamesMatch(savedTailnet string, status personalServerLocalTailscaleStatus) bool {

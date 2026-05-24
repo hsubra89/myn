@@ -292,6 +292,7 @@ func TestRunConfigureDeclinedTailnetPolicyEditDoesNotCreateCloudResources(t *tes
 			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
 				return policy
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			openURL: func(string) error {
 				return nil
 			},
@@ -364,6 +365,7 @@ func TestRunConfigureAppliesTailnetPolicyWithETagBeforeCloudResources(t *testing
 			newTailnetPolicyClient: func(tailscaleConfig) personalServerTailnetPolicyClient {
 				return policy
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			openURL: func(string) error {
 				return nil
 			},
@@ -458,6 +460,7 @@ func TestRunConfigureReReadsNoopTailnetPolicyAfterFinalConfirmation(t *testing.T
 			newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
 				return authKeys
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 		},
 	})
 	if err == nil {

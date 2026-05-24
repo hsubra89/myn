@@ -200,23 +200,25 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Wire the full Tailscale-only provisioning sequence into `myn configure`: conflict checks, final plan, policy validation and mutation, auth key creation, Hetzner create, early config save, Tailscale device polling, SSH reachability, and bootstrap marker polling. Fail hard on Tailscale reachability or bootstrap failure while preserving the saved billable server identity.
 
 ## Acceptance criteria
 
-- [ ] Configure checks for duplicate Hetzner server name and duplicate Tailscale Host before policy mutation or auth key creation.
-- [ ] Final plan includes Location, Server Type, Tailscale Host, IPv6-only public networking, no public inbound firewall rules, Tailscale policy summary, and install plan.
-- [ ] After final confirmation, configure applies any required policy changes, creates the Machine Auth Key, renders cloud-init, and creates the Hetzner server in that order.
-- [ ] Configure saves `serverID`, Personal Server User, Tailscale Host, and public IPv6 immediately after Hetzner create actions finish.
-- [ ] Configure prints separate progress for Tailscale device registration, Tailscale SSH reachability, and bootstrap marker polling.
-- [ ] Configure waits up to eight minutes for device registration with hostname match, expected tag, authorized state, and online state.
-- [ ] Configure then verifies ordinary `ssh` reachability to the Tailscale Host as the Personal Server User.
-- [ ] After SSH reachability, configure waits five minutes for the existing bootstrap marker over SSH.
-- [ ] Tailscale join, SSH reachability, bootstrap timeout, and bootstrap failure all return errors without deleting the Hetzner server.
-- [ ] Successful completion prints Tailscale Host, public IPv6 inventory, installed tool versions, partial failures if any, and `myn connect`.
-- [ ] Tests cover happy path, duplicate conflicts, final confirmation decline, policy failure before cloud resources, auth key failure before cloud resources, early save, device timeout, unauthorized device, offline device, SSH timeout, marker failure, and successful report.
+- [x] Configure checks for duplicate Hetzner server name and duplicate Tailscale Host before policy mutation or auth key creation.
+- [x] Final plan includes Location, Server Type, Tailscale Host, IPv6-only public networking, no public inbound firewall rules, Tailscale policy summary, and install plan.
+- [x] After final confirmation, configure applies any required policy changes, creates the Machine Auth Key, renders cloud-init, and creates the Hetzner server in that order.
+- [x] Configure saves `serverID`, Personal Server User, Tailscale Host, and public IPv6 immediately after Hetzner create actions finish.
+- [x] Configure prints separate progress for Tailscale device registration, Tailscale SSH reachability, and bootstrap marker polling.
+- [x] Configure waits up to eight minutes for device registration with hostname match, expected tag, authorized state, and online state.
+- [x] Configure then verifies ordinary `ssh` reachability to the Tailscale Host as the Personal Server User.
+- [x] After SSH reachability, configure waits five minutes for the existing bootstrap marker over SSH.
+- [x] Tailscale join, SSH reachability, bootstrap timeout, and bootstrap failure all return errors without deleting the Hetzner server.
+- [x] Successful completion prints Tailscale Host, public IPv6 inventory, installed tool versions, partial failures if any, and `myn connect`.
+- [x] Tests cover happy path, duplicate conflicts, final confirmation decline, policy failure before cloud resources, auth key failure before cloud resources, early save, device timeout, unauthorized device, offline device, SSH timeout, marker failure, and successful report.
 
 ## Blocked by
 

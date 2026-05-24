@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -207,6 +208,7 @@ type personalServerProvisioningGate struct {
 	newTailscaleCloudClient          func(tailscaleConfig) personalServerTailscaleCloudClient
 	newTailnetPolicyClient           func(tailscaleConfig) personalServerTailnetPolicyClient
 	newTailscaleMachineAuthKeyClient func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient
+	newTailscaleDeviceClient         func(tailscaleConfig) personalServerTailscaleDeviceClient
 	tailnetPolicyEnabled             bool
 	openURL                          func(string) error
 	saveConfig                       func(path string, cfg appConfig) error
@@ -214,6 +216,7 @@ type personalServerProvisioningGate struct {
 	runSSH                           personalServerSSHRunner
 	sleep                            func(context.Context, time.Duration) error
 	bootstrapTimeout                 time.Duration
+	tailscaleAccessTimeout           time.Duration
 	sshPollInterval                  time.Duration
 	userHomeDir                      func() (string, error)
 	stat                             func(string) (os.FileInfo, error)
@@ -428,6 +431,10 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	} else if found {
 		return fmt.Errorf("Personal Server name %q already exists in Hetzner", plan.ServerName)
 	}
+	tailscaleDevices := gate.tailscaleDeviceClient(cfg.Auth.Tailscale)
+	if err := gate.ensurePersonalServerTailscaleHostAvailable(ctx, tailscaleDevices, plan.ServerName); err != nil {
+		return err
+	}
 
 	if err := gate.applyTailnetPolicyForPersonalServer(ctx, cfg.Auth.Tailscale, personalServerTailnetPolicyInput{
 		Identity: plan.TailscaleIdentity,
@@ -495,7 +502,14 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	fmt.Fprintf(out, "Personal Server Tailscale Host: %s\n", plan.ServerName)
 	fmt.Fprintf(out, "Personal Server public IPv6 inventory: %s\n", displayPersonalServerAddress(server.IPv6))
 
-	marker, err := gate.waitForPersonalServerBootstrap(ctx, plan.User, server)
+	if err := gate.waitForPersonalServerTailscaleAccess(ctx, out, tailscaleDevices, plan); err != nil {
+		fmt.Fprintf(out, "Personal Server Tailscale access failed: %v\n", err)
+		writePersonalServerInspectionHint(out, plan, server)
+		return err
+	}
+
+	fmt.Fprintln(out, "Waiting for Personal Server Bootstrap marker.")
+	marker, err := gate.waitForPersonalServerBootstrap(ctx, plan.User, plan.ServerName)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
 		writePersonalServerInspectionHint(out, plan, server)
@@ -527,6 +541,7 @@ const (
 	personalServerSSHKeyName           = "myn-personal-server"
 	personalServerBootstrapMarkerPath  = "/var/lib/myn/personal-server-bootstrap.json"
 	defaultPersonalServerBootstrapWait = 5 * time.Minute
+	defaultPersonalServerTailscaleWait = 8 * time.Minute
 	defaultPersonalServerSSHPollWait   = 5 * time.Second
 )
 
@@ -542,38 +557,25 @@ type personalServerBootstrapMarker struct {
 	SkippedGitIdentity []string          `json:"skippedGitIdentity"`
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, user string, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
-	host := personalServerBootstrapHost(server)
+func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, user string, host string) (personalServerBootstrapMarker, error) {
+	host = strings.TrimSpace(host)
 	if host == "" {
-		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no reachable public address")
+		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no saved Tailscale Host")
 	}
 
 	runner := gate.personalServerSSHRunner()
-	if err := gate.waitForPersonalServerRootSSH(ctx, runner, "", host); err != nil {
-		return personalServerBootstrapMarker{}, err
-	}
-
 	timeout := gate.personalServerBootstrapTimeout()
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	for {
-		for _, loginUser := range personalServerBootstrapMarkerUsers(user) {
-			output, err := runner(pollCtx, "", loginUser, host, "cat "+personalServerBootstrapMarkerPath)
-			if err == nil {
-				marker, parseErr := parsePersonalServerBootstrapMarker(output)
-				if parseErr == nil {
-					return marker, nil
-				}
-			}
-			if err := ctx.Err(); err != nil {
-				return personalServerBootstrapMarker{}, err
-			}
-			if pollCtx.Err() != nil {
-				return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
+		output, err := runner(pollCtx, "", user, host, "cat "+personalServerBootstrapMarkerPath)
+		if err == nil {
+			marker, parseErr := parsePersonalServerBootstrapMarker(output)
+			if parseErr == nil {
+				return marker, nil
 			}
 		}
-
 		if err := ctx.Err(); err != nil {
 			return personalServerBootstrapMarker{}, err
 		}
@@ -587,6 +589,141 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
 	}
+}
+
+func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleAccess(ctx context.Context, out io.Writer, client personalServerTailscaleDeviceClient, plan personalServerCreationPlan) error {
+	fmt.Fprintf(out, "Waiting for Tailscale device registration: %s\n", plan.ServerName)
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	accessCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if _, err := gate.waitForPersonalServerTailscaleDevice(accessCtx, client, plan.ServerName); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Waiting for Tailscale SSH reachability: %s@%s\n", plan.User, plan.ServerName)
+	return gate.waitForPersonalServerSSHReachability(accessCtx, plan.User, plan.ServerName)
+}
+
+func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleDevice(ctx context.Context, client personalServerTailscaleDeviceClient, host string) (personalServerTailscaleDevice, error) {
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	waitingFor := fmt.Sprintf("Tailscale device registration for host %q", host)
+	for {
+		device, found, err := gate.findPersonalServerTailscaleDevice(ctx, client, host)
+		if err != nil {
+			return personalServerTailscaleDevice{}, fmt.Errorf("list Tailscale devices: %w", err)
+		}
+		if found {
+			if err := personalServerTailscaleDeviceReadyError(device, host); err == nil {
+				return device, nil
+			} else {
+				waitingFor = err.Error()
+			}
+		}
+
+		if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+			return personalServerTailscaleDevice{}, waitErr
+		}
+		if err := gate.personalServerSleep(ctx, gate.personalServerSSHPollInterval()); err != nil {
+			if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+				return personalServerTailscaleDevice{}, waitErr
+			}
+			return personalServerTailscaleDevice{}, err
+		}
+	}
+}
+
+func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(ctx context.Context, user string, host string) error {
+	runner := gate.personalServerSSHRunner()
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	waitingFor := fmt.Sprintf("Tailscale SSH reachability to %s@%s", strings.TrimSpace(user), strings.TrimSpace(host))
+	for {
+		if _, err := runner(ctx, "", user, host, "true"); err == nil {
+			return nil
+		}
+		if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+			return waitErr
+		}
+		if err := gate.personalServerSleep(ctx, gate.personalServerSSHPollInterval()); err != nil {
+			if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+				return waitErr
+			}
+			return err
+		}
+	}
+}
+
+func personalServerTimeoutOrContextError(ctx context.Context, waitingFor string, timeout time.Duration) error {
+	err := ctx.Err()
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("timed out waiting for %s after %s", waitingFor, timeout)
+	}
+	return err
+}
+
+func (gate personalServerProvisioningGate) ensurePersonalServerTailscaleHostAvailable(ctx context.Context, client personalServerTailscaleDeviceClient, host string) error {
+	if _, found, err := gate.findPersonalServerTailscaleDevice(ctx, client, host); err != nil {
+		return fmt.Errorf("check for existing Tailscale Host %q: %w", host, err)
+	} else if found {
+		return fmt.Errorf("Tailscale Host %q already exists in saved tailnet", host)
+	}
+	return nil
+}
+
+func (gate personalServerProvisioningGate) findPersonalServerTailscaleDevice(ctx context.Context, client personalServerTailscaleDeviceClient, host string) (personalServerTailscaleDevice, bool, error) {
+	devices, err := client.Devices(ctx)
+	if err != nil {
+		return personalServerTailscaleDevice{}, false, err
+	}
+	for _, device := range devices {
+		if personalServerTailscaleDeviceMatchesHost(device, host) {
+			return device, true, nil
+		}
+	}
+	return personalServerTailscaleDevice{}, false, nil
+}
+
+func personalServerTailscaleDeviceReadyError(device personalServerTailscaleDevice, host string) error {
+	if !personalServerTailscaleDeviceHasTag(device, personalServerTailscaleTag) {
+		return fmt.Errorf("Tailscale device %q to have tag %q", host, personalServerTailscaleTag)
+	}
+	if !device.Authorized {
+		return fmt.Errorf("Tailscale device %q to become authorized", host)
+	}
+	if !device.ConnectedToControl {
+		return fmt.Errorf("Tailscale device %q to come online", host)
+	}
+	return nil
+}
+
+func personalServerTailscaleDeviceHasTag(device personalServerTailscaleDevice, tag string) bool {
+	want := strings.TrimSpace(tag)
+	for _, candidate := range device.Tags {
+		if strings.TrimSpace(candidate) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func personalServerTailscaleDeviceMatchesHost(device personalServerTailscaleDevice, host string) bool {
+	want := normalizePersonalServerTailnet(host)
+	if want == "" {
+		return false
+	}
+	for _, candidate := range []string{device.Hostname, device.Name} {
+		candidate = normalizePersonalServerTailnet(candidate)
+		if candidate == want {
+			return true
+		}
+		if firstLabel, _, ok := strings.Cut(candidate, "."); ok && firstLabel == want {
+			return true
+		}
+	}
+	return false
 }
 
 func personalServerBootstrapMarkerUsers(user string) []string {
@@ -776,6 +913,13 @@ func (gate personalServerProvisioningGate) personalServerBootstrapTimeout() time
 		return gate.bootstrapTimeout
 	}
 	return defaultPersonalServerBootstrapWait
+}
+
+func (gate personalServerProvisioningGate) personalServerTailscaleAccessTimeout() time.Duration {
+	if gate.tailscaleAccessTimeout > 0 {
+		return gate.tailscaleAccessTimeout
+	}
+	return defaultPersonalServerTailscaleWait
 }
 
 func (gate personalServerProvisioningGate) personalServerSSHPollInterval() time.Duration {

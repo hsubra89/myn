@@ -1066,6 +1066,7 @@ func TestRunConfigureFinalConfirmationReportsUnavailablePricing(t *testing.T) {
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -1124,6 +1125,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 			return cloud
 		},
 		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 		userHomeDir: func() (string, error) {
 			return home, nil
 		},
@@ -1252,6 +1254,7 @@ func TestPersonalServerCreationDoesNotAttachHetznerSSHKey(t *testing.T) {
 			return cloud
 		},
 		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 		saveConfig:                       saveAppConfig,
 		runSSH:                           newSuccessfulPersonalServerSSHRunner().Run,
 	}
@@ -1347,6 +1350,7 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 			newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
 				return authKeys
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			renderBootstrap: func(input personalServerBootstrapInput) (string, error) {
 				events = append(events, "bootstrap.render")
 				renderedInput = input
@@ -1442,6 +1446,7 @@ func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudResources(t *
 			newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
 				return authKeys
 			},
+			newTailscaleDeviceClient: testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -1514,6 +1519,19 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		passwords: []string{"server-secret", "server-secret"},
 		confirms:  []bool{true},
 	}
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			nil,
+			{
+				{
+					Hostname:           "harish-personal-server",
+					Tags:               []string{personalServerTailscaleTag},
+					Authorized:         true,
+					ConnectedToControl: true,
+				},
+			},
+		},
+	}
 
 	var out bytes.Buffer
 	if err := runConfigure(&out, configureOptions{
@@ -1538,6 +1556,9 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+				return devices
+			},
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -1551,14 +1572,20 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
+	}
+	if got, want := devices.listCalls, 2; got != want {
+		t.Fatalf("Tailscale device list calls mismatch: want %d, got %d", want, got)
 	}
 	output := out.String()
 	for _, want := range []string{
 		"Personal Server created: server 654321.",
+		"Waiting for Tailscale device registration: harish-personal-server",
+		"Waiting for Tailscale SSH reachability: harish@harish-personal-server",
+		"Waiting for Personal Server Bootstrap marker.",
 		"Personal Server bootstrap completed.",
 		"Bootstrap timestamp: 2026-05-10T12:00:00Z",
 		"Reboot required: true",
@@ -1588,7 +1615,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 }
 
-func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
+func TestRunConfigurePollsBootstrapMarkerAsPersonalServerUser(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -1602,7 +1629,7 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 	ssh := &fakePersonalServerSSHRunner{
 		errors: []error{
 			nil,
-			errors.New("root login disabled"),
+			errors.New("marker not ready"),
 			nil,
 		},
 		outputs: []string{
@@ -1639,10 +1666,14 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 				return successfulPersonalServerCloudClient()
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
 			runSSH: ssh.Run,
+			sleep: func(context.Context, time.Duration) error {
+				return nil
+			},
 			currentUsername: func() string {
 				return "harish"
 			},
@@ -1652,14 +1683,14 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: "", user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
 	if strings.Contains(out.String(), "- root IPv4:") {
-		t.Fatalf("successful hardened bootstrap should not print root SSH commands, got %q", out.String())
+		t.Fatalf("successful bootstrap should not print root SSH commands, got %q", out.String())
 	}
 	if !strings.Contains(out.String(), "Personal Server bootstrap completed.") {
 		t.Fatalf("expected bootstrap completion output, got %q", out.String())
@@ -1683,7 +1714,6 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 			errors.New("connection refused"),
 			nil,
 			errors.New("connection reset during reboot"),
-			errors.New("user SSH not ready during reboot"),
 			nil,
 		},
 		outputs: []string{
@@ -1720,6 +1750,7 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -1736,11 +1767,10 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: "", user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "true"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "harish-personal-server", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1795,6 +1825,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 				return successfulPersonalServerCloudClient()
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -1879,6 +1910,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 				return successfulPersonalServerCloudClient()
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2027,6 +2059,7 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2100,6 +2133,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 				return successfulPersonalServerCloudClient()
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2172,6 +2206,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 				return successfulPersonalServerCloudClient()
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2254,6 +2289,7 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2278,6 +2314,231 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 	if !cfg.PersonalServer.isZero() {
 		t.Fatalf("duplicate name should not save Personal Server Configuration, got %#v", cfg.PersonalServer)
 	}
+}
+
+func TestRunConfigureFailsWhenTailscaleHostAlreadyExists(t *testing.T) {
+	cloud := successfulPersonalServerCloudClient()
+	authKeys := &fakePersonalServerMachineAuthKeyClient{}
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         true,
+				ConnectedToControl: true,
+			}},
+		},
+	}
+
+	_, configPath, err := runConfigurePersonalServerCreationTest(t, personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return cloud
+		},
+		newTailscaleMachineAuthKeyClient: func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient {
+			return authKeys
+		},
+		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+			return devices
+		},
+		currentUsername: func() string {
+			return "harish"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate Tailscale Host error")
+	}
+	if !strings.Contains(err.Error(), `Tailscale Host "harish-personal-server" already exists in saved tailnet`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(authKeys.requests) != 0 {
+		t.Fatalf("duplicate Tailscale Host should stop before auth key creation, got %#v", authKeys.requests)
+	}
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("duplicate Tailscale Host should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
+	}
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.PersonalServer.isZero() {
+		t.Fatalf("duplicate Tailscale Host should not save Personal Server Configuration, got %#v", cfg.PersonalServer)
+	}
+}
+
+func TestRunConfigureReportsTailscaleDeviceTimeoutButKeepsSavedServer(t *testing.T) {
+	cloud := successfulPersonalServerCloudClient()
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{nil, nil},
+	}
+	sshCalls := 0
+
+	out, configPath, err := runConfigurePersonalServerCreationTest(t, personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return cloud
+		},
+		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+			return devices
+		},
+		runSSH: func(context.Context, string, string, string, string) (string, error) {
+			sshCalls++
+			return "", errors.New("ssh should not run before Tailscale device readiness")
+		},
+		tailscaleAccessTimeout: time.Nanosecond,
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		currentUsername: func() string {
+			return "harish"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Tailscale device timeout")
+	}
+	if !strings.Contains(err.Error(), `timed out waiting for Tailscale device registration for host "harish-personal-server"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sshCalls != 0 {
+		t.Fatalf("SSH should not be checked before Tailscale device readiness, got %d calls", sshCalls)
+	}
+	if !strings.Contains(out, "Personal Server Tailscale access failed: timed out waiting for Tailscale device registration") {
+		t.Fatalf("expected Tailscale access failure output, got %q", out)
+	}
+	assertSavedPersonalServerConfig(t, configPath)
+}
+
+func TestRunConfigureReportsUnauthorizedTailscaleDeviceButKeepsSavedServer(t *testing.T) {
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			nil,
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         false,
+				ConnectedToControl: true,
+			}},
+		},
+	}
+
+	_, configPath, err := runConfigurePersonalServerCreationTest(t, personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return successfulPersonalServerCloudClient()
+		},
+		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+			return devices
+		},
+		tailscaleAccessTimeout: time.Nanosecond,
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		currentUsername: func() string {
+			return "harish"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected unauthorized Tailscale device error")
+	}
+	if !strings.Contains(err.Error(), `timed out waiting for Tailscale device "harish-personal-server" to become authorized`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSavedPersonalServerConfig(t, configPath)
+}
+
+func TestRunConfigureReportsOfflineTailscaleDeviceButKeepsSavedServer(t *testing.T) {
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			nil,
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         true,
+				ConnectedToControl: false,
+			}},
+		},
+	}
+
+	_, configPath, err := runConfigurePersonalServerCreationTest(t, personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return successfulPersonalServerCloudClient()
+		},
+		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+			return devices
+		},
+		tailscaleAccessTimeout: time.Nanosecond,
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		currentUsername: func() string {
+			return "harish"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected offline Tailscale device error")
+	}
+	if !strings.Contains(err.Error(), `timed out waiting for Tailscale device "harish-personal-server" to come online`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertSavedPersonalServerConfig(t, configPath)
+}
+
+func TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer(t *testing.T) {
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			nil,
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         true,
+				ConnectedToControl: true,
+			}},
+		},
+	}
+	sshCalls := 0
+
+	out, configPath, err := runConfigurePersonalServerCreationTest(t, personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return successfulPersonalServerCloudClient()
+		},
+		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+			return devices
+		},
+		runSSH: func(context.Context, string, string, string, string) (string, error) {
+			sshCalls++
+			return "", errors.New("connection refused")
+		},
+		tailscaleAccessTimeout: time.Nanosecond,
+		sleep: func(ctx context.Context, _ time.Duration) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		currentUsername: func() string {
+			return "harish"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Tailscale SSH timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out waiting for Tailscale SSH reachability to harish@harish-personal-server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sshCalls == 0 {
+		t.Fatal("expected SSH reachability attempts")
+	}
+	if !strings.Contains(out, "Waiting for Tailscale SSH reachability: harish@harish-personal-server") {
+		t.Fatalf("expected SSH reachability progress output, got %q", out)
+	}
+	assertSavedPersonalServerConfig(t, configPath)
 }
 
 func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
@@ -2332,6 +2593,7 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2417,6 +2679,7 @@ func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 				return cloud
 			},
 			newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+			newTailscaleDeviceClient:         testPersonalServerTailscaleDeviceClient,
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
@@ -2960,6 +3223,56 @@ func testPersonalServerLocalTailscaleClientWithIdentity(identity string) persona
 	})
 }
 
+func runConfigurePersonalServerCreationTest(t *testing.T, gate personalServerProvisioningGate) (string, string, error) {
+	t.Helper()
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:          "projects",
+		localRootSet:       true,
+		remoteRoot:         "projects",
+		remoteRootSet:      true,
+		sshIdentityFile:    identity.PrivatePath,
+		sshIdentityFileSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		sshPublicKey: testSSHPublicKeyFunc(identity),
+		prompter: &fakeConfigurePrompter{
+			canPrompt: true,
+			inputs:    []string{"harish", "harish-personal-server"},
+			passwords: []string{"server-secret", "server-secret"},
+			confirms:  []bool{true},
+		},
+		personalServerProvisioner: gate,
+	})
+	return out.String(), configPath, err
+}
+
+func assertSavedPersonalServerConfig(t *testing.T, configPath string) {
+	t.Helper()
+	cfg, err := loadAppConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", TailscaleHost: "harish-personal-server", IPv6: "2001:db8::55"}); got != want {
+		t.Fatalf("saved Personal Server Configuration mismatch: want %#v, got %#v", want, got)
+	}
+}
+
 type personalServerSSHCall struct {
 	identityFile string
 	user         string
@@ -3024,6 +3337,49 @@ func (c *fakePersonalServerMachineAuthKeyClient) CreateMachineAuthKey(_ context.
 		key = "tskey-auth-fake"
 	}
 	return personalServerTailscaleMachineAuthKey{Key: key}, nil
+}
+
+type fakePersonalServerTailscaleDeviceClient struct {
+	devices    [][]personalServerTailscaleDevice
+	err        error
+	hostChecks []string
+	listCalls  int
+}
+
+func (c *fakePersonalServerTailscaleDeviceClient) Devices(context.Context) ([]personalServerTailscaleDevice, error) {
+	c.listCalls++
+	if c.err != nil {
+		return nil, c.err
+	}
+	var devices []personalServerTailscaleDevice
+	if len(c.devices) > 0 {
+		devices = c.devices[0]
+		if len(c.devices) > 1 {
+			c.devices = c.devices[1:]
+		}
+	}
+	for _, device := range devices {
+		if strings.TrimSpace(device.Hostname) != "" {
+			c.hostChecks = append(c.hostChecks, strings.TrimSpace(device.Hostname))
+			continue
+		}
+		c.hostChecks = append(c.hostChecks, strings.TrimSpace(device.Name))
+	}
+	return append([]personalServerTailscaleDevice(nil), devices...), nil
+}
+
+func testPersonalServerTailscaleDeviceClient(tailscaleConfig) personalServerTailscaleDeviceClient {
+	return &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			nil,
+			{{
+				Hostname:           "harish-personal-server",
+				Tags:               []string{personalServerTailscaleTag},
+				Authorized:         true,
+				ConnectedToControl: true,
+			}},
+		},
+	}
 }
 
 func (c *fakePersonalServerCloudClient) recordContext(ctx context.Context) error {

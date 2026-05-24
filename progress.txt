@@ -100,3 +100,14 @@
 - Updated final plan and bootstrap completion/failure output to describe IPv6-only public networking, no public inbound firewall rules, the Tailscale Host, public IPv6 inventory, and `myn connect` without public SSH or Mosh commands.
 - Updated Issue 7 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 8 as the next highest-priority unblocked task because Issues 4-7 and 11 had completed the prerequisites for full Tailscale-only configure completion.
+- Added a Tailscale device-listing boundary and duplicate Tailscale Host check before Tailnet Policy mutation, Machine Auth Key creation, or cloud resource creation.
+- Reworked Personal Server completion to save the billable server identity after Hetzner create actions, then print separate progress while waiting for Tailscale device registration, Tailscale SSH reachability, and bootstrap marker polling.
+- Changed reachability and bootstrap verification to use ordinary `ssh` to the Tailscale Host as the Personal Server User, with the bootstrap marker read over that real access path.
+- Added hard-fail handling that preserves saved Personal Server Configuration for device timeout, unauthorized device, offline device, SSH timeout, bootstrap timeout, and bootstrap failure.
+- Added tests for the Tailscale-only happy path, duplicate Tailscale Host conflict, device timeout, unauthorized/offline devices, SSH timeout, and updated bootstrap polling expectations.
+- Updated Issue 8 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
