@@ -1,3 +1,9 @@
+# Review notes
+
+- P1: `go/cli/internal/cli/personal_server_bootstrap.go:287-304` checks `systemctl list-unit-files ssh`, which does not match Ubuntu's `ssh.service`; bootstrap can leave OpenSSH active and then fail at the later active-service check. Disable and verify the actual `ssh.service`/`sshd.service` units as well as sockets.
+- P1: `go/cli/internal/cli/personal_server.go:653-659` polls Tailscale SSH with non-interactive `ssh true` and discards failure output. With a Tailscale SSH rule using `checkPeriod: "always"`, required SSO check URLs can be hidden until configure times out after creating and saving the server; surface the check prompt or establish one approved interactive connection before polling.
+- P2: `go/cli/internal/cli/configure.go:198-202` still runs legacy SSH identity setup whenever Tailscale Credentials are missing. With Hetzner auth present and no SSH identity, configure can fail before the Personal Server path prints `myn auth tailscale` guidance; skip SSH identity setup for the Tailscale-only provisioning path.
+
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.
