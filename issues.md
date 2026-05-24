@@ -1,3 +1,9 @@
+# Review notes
+
+- [P1] Make bootstrap marker polling use the same check-aware Tailscale SSH path as reachability checks. `waitForPersonalServerBootstrap` uses the default marker runner, which forces `BatchMode=yes` and captures stderr, so a second `checkPeriod: "always"` SSH check URL can be hidden and cause a healthy server to time out. `go/cli/internal/cli/personal_server.go:568`, `go/cli/internal/cli/personal_server.go:872`
+- [P2] Reject existing exact-scope SSH rules that still bypass required checks. `personalServerTailnetPolicySSHRuleScopeIsNarrow` ignores `action` and `checkPeriod`, allowing an existing `accept` or non-`always` rule to remain alongside the appended check rule. `go/cli/internal/cli/personal_server_tailnet_policy.go:413`, `go/cli/internal/cli/personal_server_tailnet_policy.go:437`
+- [P2] Reconfirm or abort when the re-read Tailnet Policy plan differs from the accepted preview. `applyTailnetPolicyForPersonalServer` applies any recomputed change as long as the preview needed changes, so concurrent edits can produce unreviewed policy mutations. `go/cli/internal/cli/personal_server_tailnet_policy.go:160`
+
 # Tailscale-Only Personal Server Issues
 
 Source: the Tailscale-only Personal Server decisions captured in the domain context and ADR-0006.
