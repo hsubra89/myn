@@ -110,6 +110,53 @@ func (client personalServerTailscaleAPIClient) TailnetContainsNodeID(ctx context
 	return false, nil
 }
 
+func (client personalServerTailscaleAPIClient) ReadPolicy(ctx context.Context) (personalServerTailnetPolicy, error) {
+	cloudClient := client.client
+	if cloudClient == nil {
+		return personalServerTailnetPolicy{}, fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	rawPolicy, err := cloudClient.PolicyFile().Raw(ctx)
+	if err != nil {
+		return personalServerTailnetPolicy{}, mapTailscaleValidationError(ctx, "Tailnet Policy read", err)
+	}
+	policy := strings.TrimSpace(rawPolicy.HuJSON)
+	if policy == "" {
+		policy = tailscaleValidationEmptyPolicy
+	}
+	return personalServerTailnetPolicy{
+		HuJSON: policy,
+		ETag:   rawPolicy.ETag,
+	}, nil
+}
+
+func (client personalServerTailscaleAPIClient) ValidatePolicy(ctx context.Context, rawHuJSON string) error {
+	cloudClient := client.client
+	if cloudClient == nil {
+		return fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	if strings.TrimSpace(rawHuJSON) == "" {
+		rawHuJSON = tailscaleValidationEmptyPolicy
+	}
+	if err := cloudClient.PolicyFile().Validate(ctx, rawHuJSON); err != nil {
+		return mapTailscaleValidationError(ctx, "Tailnet Policy validation", err)
+	}
+	return nil
+}
+
+func (client personalServerTailscaleAPIClient) ApplyPolicy(ctx context.Context, rawHuJSON string, etag string) error {
+	cloudClient := client.client
+	if cloudClient == nil {
+		return fmt.Errorf("Tailscale cloud client is unavailable")
+	}
+	if strings.TrimSpace(rawHuJSON) == "" {
+		rawHuJSON = tailscaleValidationEmptyPolicy
+	}
+	if err := cloudClient.PolicyFile().Set(ctx, rawHuJSON, etag); err != nil {
+		return mapTailscaleValidationError(ctx, "Tailnet Policy update", err)
+	}
+	return nil
+}
+
 func (gate personalServerProvisioningGate) verifyLocalTailscaleForPersonalServerCreation(ctx context.Context, cfg tailscaleConfig) (personalServerLocalTailscaleStatus, error) {
 	status, err := gate.localTailscaleClient().Status(ctx)
 	if err != nil {

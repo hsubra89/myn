@@ -36,3 +36,14 @@
 - Fixed interactive `myn auth tailscale` browser opening to wait for the opener exit status, so a started-but-failing `xdg-open`/`open` still prints the Tailscale Keys URL fallback.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with focused Tailscale regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 4 as the next highest-priority unblocked task because Tailnet Policy planning is the remaining prerequisite for one-off Machine Auth Key creation and later Tailscale-only provisioning orchestration.
+- Added a testable Tailnet Policy planner for `tag:myn-personal-server` that detects existing tag ownership, network grants on `tcp:22`, and narrow Tailscale SSH rules for the selected Personal Server User with `checkPeriod: "always"`.
+- Updated `myn configure` to read Tailnet Policy after the Personal Server User is selected, summarize missing policy pieces, open the Tailscale Access Controls page when edits are needed, ask before API editing, and validate the current or proposed policy before the final server creation confirmation.
+- Added post-confirmation Tailnet Policy re-read, re-validation, and ETag-protected apply before any Hetzner resources are created.
+- Preserved unrelated policy content with HuJSON patch edits, kept existing comments where practical, added Myn comments to inserted policy sections, used grants for network access, and did not add policy tests or migrate legacy ACLs.
+- Added tests for no-op policy, missing tag owner, missing grant, missing SSH rule, combined changes, validation failure, apply conflict, and declined policy edits.
+- Updated Issue 4 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

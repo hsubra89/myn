@@ -183,6 +183,8 @@ type personalServerCreationPlan struct {
 	GitIdentity                personalServerGitIdentity
 	RemoteProjectRoot          string
 	SSHIdentityFile            string
+	TailscaleIdentity          string
+	TailnetPolicy              personalServerTailnetPolicyPlan
 	ExistingFirewall           bool
 	PrimaryIPv4MonthlyGrossEUR string
 }
@@ -203,6 +205,9 @@ type personalServerProvisioningGate struct {
 	newCloudClient          func(token string) personalServerCloudClient
 	newLocalTailscaleClient func() personalServerLocalTailscaleClient
 	newTailscaleCloudClient func(tailscaleConfig) personalServerTailscaleCloudClient
+	newTailnetPolicyClient  func(tailscaleConfig) personalServerTailnetPolicyClient
+	tailnetPolicyEnabled    bool
+	openURL                 func(string) error
 	saveConfig              func(path string, cfg appConfig) error
 	runSSH                  personalServerSSHRunner
 	sleep                   func(context.Context, time.Duration) error
@@ -392,7 +397,16 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			GitIdentity:       inputs.GitIdentity,
 			RemoteProjectRoot: cfg.Projects.RemoteRoot,
 			SSHIdentityFile:   cfg.SSH.IdentityFile,
+			TailscaleIdentity: localTailscale.Identity,
 		}
+		policyPlan, proceed, err := gate.prepareTailnetPolicyForPersonalServer(ctx, out, cfg.Auth.Tailscale, localTailscale.Identity, inputs.User, prompter)
+		if err != nil {
+			return err
+		}
+		if !proceed {
+			return nil
+		}
+		plan.TailnetPolicy = policyPlan
 		if createClient, ok := client.(personalServerCreateCloudClient); ok {
 			existingFirewall, err := personalServerFirewallExists(ctx, createClient)
 			if err != nil {
@@ -429,6 +443,14 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return fmt.Errorf("check for existing Personal Server name %q: %w", plan.ServerName, err)
 	} else if found {
 		return fmt.Errorf("Personal Server name %q already exists in Hetzner", plan.ServerName)
+	}
+
+	if err := gate.applyTailnetPolicyForPersonalServer(ctx, cfg.Auth.Tailscale, personalServerTailnetPolicyInput{
+		Identity: plan.TailscaleIdentity,
+		User:     plan.User,
+		Tag:      personalServerTailscaleTag,
+	}, plan.TailnetPolicy); err != nil {
+		return err
 	}
 
 	identity, err := gate.loadPersonalServerSSHIdentity(plan.SSHIdentityFile)
@@ -1252,6 +1274,7 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 		fmt.Fprintf(out, "Firewall: %s (inbound SSH and Mosh UDP %s over IPv4 and IPv6)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
 	}
 	fmt.Fprintln(out, "Public network: IPv4 and IPv6 enabled")
+	writePersonalServerTailnetPolicySummary(out, plan.TailnetPolicy)
 	fmt.Fprintf(out, "Remote project root: ~/%s\n", plan.RemoteProjectRoot)
 	fmt.Fprintln(out, "Install plan:")
 	fmt.Fprintln(out, "System services:")

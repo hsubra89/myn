@@ -87,22 +87,24 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Teach `myn configure` to compute, validate, summarize, and optionally apply the minimum Tailnet Policy required for a Tailscale-only Personal Server. The policy should be idempotent, use grants for network access, preserve unrelated policy content where practical, and apply only after final Personal Server creation confirmation.
 
 ## Acceptance criteria
 
-- [ ] Configure detects whether `tag:myn-personal-server` is owned by the current Tailscale identity.
-- [ ] Configure detects whether a grant already allows the current Tailscale identity to reach `tag:myn-personal-server` on port `22`.
-- [ ] Configure detects whether a Tailscale SSH rule already allows the current Tailscale identity to SSH to `tag:myn-personal-server` only as the selected Personal Server User with `checkPeriod: "always"`.
-- [ ] Missing policy pieces are represented as a concise semantic summary before confirmation.
-- [ ] When policy changes are needed, configure opens the Tailscale Access Controls page and falls back to printing the URL.
-- [ ] The current or proposed policy is validated before final Personal Server creation confirmation without mutating policy.
-- [ ] After final confirmation, configure re-reads, re-validates, and applies the policy with ETag protection before creating auth keys or cloud resources.
-- [ ] Policy edits use grants, do not migrate unrelated legacy ACLs, do not add policy tests, and are idempotent.
-- [ ] HuJSON comments and formatting are preserved where practical, and Myn-added entries include comments when practical.
-- [ ] Tests cover no-op policy, missing tag owner, missing grant, missing SSH rule, combined changes, validation failure, apply conflict, and declined policy edit.
+- [x] Configure detects whether `tag:myn-personal-server` is owned by the current Tailscale identity.
+- [x] Configure detects whether a grant already allows the current Tailscale identity to reach `tag:myn-personal-server` on port `22`.
+- [x] Configure detects whether a Tailscale SSH rule already allows the current Tailscale identity to SSH to `tag:myn-personal-server` only as the selected Personal Server User with `checkPeriod: "always"`.
+- [x] Missing policy pieces are represented as a concise semantic summary before confirmation.
+- [x] When policy changes are needed, configure opens the Tailscale Access Controls page and falls back to printing the URL.
+- [x] The current or proposed policy is validated before final Personal Server creation confirmation without mutating policy.
+- [x] After final confirmation, configure re-reads, re-validates, and applies the policy with ETag protection before creating auth keys or cloud resources.
+- [x] Policy edits use grants, do not migrate unrelated legacy ACLs, do not add policy tests, and are idempotent.
+- [x] HuJSON comments and formatting are preserved where practical, and Myn-added entries include comments when practical.
+- [x] Tests cover no-op policy, missing tag owner, missing grant, missing SSH rule, combined changes, validation failure, apply conflict, and declined policy edit.
 
 ## Blocked by
 
