@@ -19,24 +19,34 @@ import (
 )
 
 const (
-	liveValidationEnabledEnv     = "MYN_LIVE_HETZNER"
-	liveValidationAPIKeyEnv      = "HETZNER_API_KEY"
-	liveValidationLocationEnv    = "MYN_LIVE_HETZNER_LOCATION"
-	liveValidationServerTypeEnv  = "MYN_LIVE_HETZNER_SERVER_TYPE"
-	liveValidationBootstrapLimit = 5 * time.Minute
-	liveValidationTestTimeout    = 30 * time.Minute
-	liveValidationUser           = "melive"
-	liveValidationRemoteRoot     = "Remote Projects"
-	liveValidationGitName        = "Myn Live Validation"
-	liveValidationGitEmail       = "myn-live@example.invalid"
+	liveValidationEnabledEnv          = "MYN_LIVE_TAILSCALE"
+	liveValidationHetznerAPIKeyEnv    = "HETZNER_API_KEY"
+	liveValidationTailscaleAPIKeyEnv  = "TAILSCALE_API_TOKEN"
+	liveValidationTailscaleTailnetEnv = "TAILSCALE_TAILNET"
+	liveValidationLocationEnv         = "MYN_LIVE_HETZNER_LOCATION"
+	liveValidationServerTypeEnv       = "MYN_LIVE_HETZNER_SERVER_TYPE"
+	liveValidationBootstrapLimit      = 5 * time.Minute
+	liveValidationTestTimeout         = 30 * time.Minute
+	liveValidationUser                = "melive"
+	liveValidationRemoteRoot          = "Remote Projects"
+	liveValidationGitName             = "Myn Live Validation"
+	liveValidationGitEmail            = "myn-live@example.invalid"
 )
 
-func TestLoadLiveValidationEnvFileReadsHetznerAPIKey(t *testing.T) {
+type liveValidationCredentials struct {
+	HetznerAPIKey    string
+	TailscaleAPIKey  string
+	TailscaleTailnet string
+}
+
+func TestLoadLiveValidationEnvFileReadsCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env.local")
 	if err := os.WriteFile(path, []byte(`
 # local live validation secrets
 IGNORED=value
 HETZNER_API_KEY=' live-token '
+TAILSCALE_API_TOKEN=' ts-token '
+TAILSCALE_TAILNET=' example.com '
 `), 0o600); err != nil {
 		t.Fatalf("write env file: %v", err)
 	}
@@ -45,12 +55,18 @@ HETZNER_API_KEY=' live-token '
 	if err != nil {
 		t.Fatalf("load env file: %v", err)
 	}
-	token, err := liveValidationHetznerAPIKey(env)
+	credentials, err := liveValidationCredentialsFromEnv(env)
 	if err != nil {
-		t.Fatalf("read token: %v", err)
+		t.Fatalf("read credentials: %v", err)
 	}
-	if token != "live-token" {
-		t.Fatalf("token mismatch: want %q, got %q", "live-token", token)
+	if credentials.HetznerAPIKey != "live-token" {
+		t.Fatalf("Hetzner token mismatch: want %q, got %q", "live-token", credentials.HetznerAPIKey)
+	}
+	if credentials.TailscaleAPIKey != "ts-token" {
+		t.Fatalf("Tailscale token mismatch: want %q, got %q", "ts-token", credentials.TailscaleAPIKey)
+	}
+	if credentials.TailscaleTailnet != "example.com" {
+		t.Fatalf("Tailscale tailnet mismatch: want %q, got %q", "example.com", credentials.TailscaleTailnet)
 	}
 }
 
@@ -64,8 +80,11 @@ func TestLoadLiveValidationEnvFileReportsMissingFile(t *testing.T) {
 	}
 }
 
-func TestLiveValidationHetznerAPIKeyReportsMissingToken(t *testing.T) {
-	_, err := liveValidationHetznerAPIKey(map[string]string{"OTHER": "value"})
+func TestLiveValidationCredentialsReportsMissingHetznerToken(t *testing.T) {
+	_, err := liveValidationCredentialsFromEnv(map[string]string{
+		liveValidationTailscaleAPIKeyEnv:  "ts-token",
+		liveValidationTailscaleTailnetEnv: "example.com",
+	})
 	if err == nil {
 		t.Fatal("expected missing HETZNER_API_KEY error")
 	}
@@ -74,9 +93,21 @@ func TestLiveValidationHetznerAPIKeyReportsMissingToken(t *testing.T) {
 	}
 }
 
+func TestLiveValidationCredentialsReportsMissingTailscaleCredentials(t *testing.T) {
+	_, err := liveValidationCredentialsFromEnv(map[string]string{
+		liveValidationHetznerAPIKeyEnv: "hetzner-token",
+	})
+	if err == nil {
+		t.Fatal("expected missing Tailscale credential error")
+	}
+	if !strings.Contains(err.Error(), "TAILSCALE_API_TOKEN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLivePersonalServerProvisioning(t *testing.T) {
 	if os.Getenv(liveValidationEnabledEnv) != "1" {
-		t.Skipf("set %s=1 to run live Hetzner Personal Server validation", liveValidationEnabledEnv)
+		t.Skipf("set %s=1 to run live Tailscale-only Personal Server validation", liveValidationEnabledEnv)
 	}
 
 	repoRoot, err := findLiveValidationRepoRoot()
@@ -87,7 +118,7 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	if err != nil {
 		t.Skip(err.Error())
 	}
-	token, err := liveValidationHetznerAPIKey(env)
+	credentials, err := liveValidationCredentialsFromEnv(env)
 	if err != nil {
 		t.Skip(err.Error())
 	}
@@ -99,41 +130,19 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, liveValidationRemoteRoot), 0o700); err != nil {
 		t.Fatalf("create isolated local root: %v", err)
 	}
-	identityPath := filepath.Join(home, ".ssh", "id_ed25519")
-	generateLiveValidationSSHKey(t, identityPath)
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
-	publicKeyLine := liveValidationSSHPublicKey(t, identityPath)
-	publicKey, err := parseSSHPublicKey(publicKeyLine)
-	if err != nil {
-		t.Fatalf("parse generated SSH public key: %v", err)
-	}
-	sshKeyFingerprint, err := sshPublicKeyHetznerFingerprint(publicKey)
-	if err != nil {
-		t.Fatalf("compute Hetzner SSH key fingerprint: %v", err)
-	}
 
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	serverName := liveValidationServerName(t)
-	client := liveValidationHcloudClient(token)
+	client := liveValidationHcloudClient(credentials.HetznerAPIKey)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cleanupCancel()
 		cleanupLiveValidationServer(cleanupCtx, t, client, configPath, serverName)
 	})
 
-	beforeFirewall, _, err := client.Firewall.GetByName(ctx, personalServerFirewallName)
-	if err != nil {
-		t.Fatalf("check existing live Personal Server Firewall: %v", err)
-	}
-	firewallExisted := beforeFirewall != nil
-	beforeSSHKey, _, err := client.SSHKey.GetByFingerprint(ctx, sshKeyFingerprint)
-	if err != nil {
-		t.Fatalf("check existing live Personal Server SSH Key: %v", err)
-	}
-	sshKeyExisted := beforeSSHKey != nil
-
 	var authOut bytes.Buffer
-	if err := runHetznerAuth(ctx, &authOut, hetznerAuthOptions{token: token}, hetznerAuthDeps{
+	if err := runHetznerAuth(ctx, &authOut, hetznerAuthOptions{token: credentials.HetznerAPIKey}, hetznerAuthDeps{
 		appConfigPath: func() (string, error) {
 			return configPath, nil
 		},
@@ -144,8 +153,27 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save isolated Hetzner Credentials: %v", err)
 	}
-	if strings.Contains(authOut.String(), token) {
+	if strings.Contains(authOut.String(), credentials.HetznerAPIKey) {
 		t.Fatal("Hetzner API key was printed during live auth")
+	}
+
+	var tailscaleAuthOut bytes.Buffer
+	if err := runTailscaleAuth(ctx, &tailscaleAuthOut, tailscaleAuthOptions{
+		token:   credentials.TailscaleAPIKey,
+		tailnet: credentials.TailscaleTailnet,
+	}, tailscaleAuthDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		env: func(string) string {
+			return ""
+		},
+		validateCredentials: newTailscaleCloudValidator("").validate,
+	}); err != nil {
+		t.Fatalf("save isolated Tailscale Credentials: %v", err)
+	}
+	if strings.Contains(tailscaleAuthOut.String(), credentials.TailscaleAPIKey) {
+		t.Fatal("Tailscale API key was printed during live auth")
 	}
 
 	prompter := &liveValidationConfigurePrompter{
@@ -156,12 +184,10 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}
 	var out bytes.Buffer
 	err = runConfigure(&out, configureOptions{
-		localRoot:          liveValidationRemoteRoot,
-		localRootSet:       true,
-		remoteRoot:         liveValidationRemoteRoot,
-		remoteRootSet:      true,
-		sshIdentityFile:    identityPath,
-		sshIdentityFileSet: true,
+		localRoot:     liveValidationRemoteRoot,
+		localRootSet:  true,
+		remoteRoot:    liveValidationRemoteRoot,
+		remoteRootSet: true,
 	}, configureDeps{
 		ctx: ctx,
 		appConfigPath: func() (string, error) {
@@ -173,13 +199,17 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 		prompter: prompter,
 		personalServerProvisioner: personalServerProvisioningGate{
 			newCloudClient: func(gotToken string) personalServerCloudClient {
-				if gotToken != token {
+				if gotToken != credentials.HetznerAPIKey {
 					t.Fatalf("live configure used unexpected Hetzner token")
 				}
 				return newHcloudPersonalServerCloudClient(gotToken, "")
 			},
 			userHomeDir: func() (string, error) {
 				return home, nil
+			},
+			tailnetPolicyEnabled: true,
+			openURL: func(string) error {
+				return nil
 			},
 			runSSH:           liveValidationSSHRunner(knownHostsPath),
 			bootstrapTimeout: liveValidationBootstrapLimit,
@@ -198,8 +228,11 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 			},
 		},
 	})
-	if strings.Contains(out.String(), token) {
+	if strings.Contains(out.String(), credentials.HetznerAPIKey) {
 		t.Fatal("Hetzner API key was printed during live configure")
+	}
+	if strings.Contains(out.String(), credentials.TailscaleAPIKey) {
+		t.Fatal("Tailscale API key was printed during live configure")
 	}
 
 	cfg, loadErr := loadAppConfig(configPath)
@@ -219,16 +252,16 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 		t.Fatalf("live validation server %d was not found after configure", cfg.PersonalServer.ServerID)
 	}
 	assertLiveValidationServer(t, server, cfg, serverName, prompter.selectedLocationName, prompter.selectedServerTypeName)
-	assertLiveValidationFirewall(t, ctx, client, beforeFirewall, firewallExisted)
-	assertLiveValidationSSHKey(t, ctx, client, beforeSSHKey, sshKeyExisted, sshKeyFingerprint, publicKeyLine)
-	assertLiveValidationBootstrap(t, ctx, identityPath, knownHostsPath, cfg.PersonalServer.IPv4)
-	assertLiveValidationRemoteSetup(t, ctx, identityPath, knownHostsPath, cfg.PersonalServer.IPv4)
+	assertLiveValidationFirewall(t, ctx, client)
+	assertLiveValidationTailscaleDevice(t, ctx, cfg)
+	assertLiveValidationBootstrap(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
+	assertLiveValidationRemoteSetup(t, ctx, knownHostsPath, cfg.PersonalServer.TailscaleHost)
 }
 
 func loadLiveValidationEnvFile(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("live validation requires .env.local at %s with %s", path, liveValidationAPIKeyEnv)
+		return nil, fmt.Errorf("live validation requires .env.local at %s with %s, %s, and %s", path, liveValidationHetznerAPIKeyEnv, liveValidationTailscaleAPIKeyEnv, liveValidationTailscaleTailnetEnv)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read live validation .env.local: %w", err)
@@ -261,12 +294,22 @@ func loadLiveValidationEnvFile(path string) (map[string]string, error) {
 	return env, nil
 }
 
-func liveValidationHetznerAPIKey(env map[string]string) (string, error) {
-	token := strings.TrimSpace(env[liveValidationAPIKeyEnv])
-	if token == "" {
-		return "", fmt.Errorf("live validation requires %s in .env.local", liveValidationAPIKeyEnv)
+func liveValidationCredentialsFromEnv(env map[string]string) (liveValidationCredentials, error) {
+	credentials := liveValidationCredentials{
+		HetznerAPIKey:    strings.TrimSpace(env[liveValidationHetznerAPIKeyEnv]),
+		TailscaleAPIKey:  strings.TrimSpace(env[liveValidationTailscaleAPIKeyEnv]),
+		TailscaleTailnet: strings.TrimSpace(env[liveValidationTailscaleTailnetEnv]),
 	}
-	return token, nil
+	switch {
+	case credentials.HetznerAPIKey == "":
+		return liveValidationCredentials{}, fmt.Errorf("live validation requires %s in .env.local", liveValidationHetznerAPIKeyEnv)
+	case credentials.TailscaleAPIKey == "":
+		return liveValidationCredentials{}, fmt.Errorf("live validation requires %s in .env.local", liveValidationTailscaleAPIKeyEnv)
+	case credentials.TailscaleTailnet == "":
+		return liveValidationCredentials{}, fmt.Errorf("live validation requires %s in .env.local", liveValidationTailscaleTailnetEnv)
+	default:
+		return credentials, nil
+	}
 }
 
 func findLiveValidationRepoRoot() (string, error) {
@@ -291,32 +334,6 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func generateLiveValidationSSHKey(t *testing.T, identityPath string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(identityPath), 0o700); err != nil {
-		t.Fatalf("create isolated ~/.ssh: %v", err)
-	}
-	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "myn-live-validation", "-f", identityPath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("generate live validation SSH key: %v", commandOutputError("ssh-keygen", output, err))
-	}
-	if err := os.Chmod(identityPath, 0o600); err != nil {
-		t.Fatalf("secure live validation SSH key: %v", err)
-	}
-	if err := os.Chmod(identityPath+".pub", 0o644); err != nil {
-		t.Fatalf("secure live validation SSH public key: %v", err)
-	}
-}
-
-func liveValidationSSHPublicKey(t *testing.T, identityPath string) string {
-	t.Helper()
-	output, err := exec.Command("ssh-keygen", "-y", "-f", identityPath).CombinedOutput()
-	if err != nil {
-		t.Fatalf("read live validation SSH public key: %v", commandOutputError("ssh-keygen -y", output, err))
-	}
-	return strings.TrimSpace(string(output))
-}
-
 func liveValidationServerName(t *testing.T) string {
 	t.Helper()
 	var randomBytes [3]byte
@@ -335,10 +352,13 @@ func liveValidationHcloudClient(token string) *hcloud.Client {
 
 func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
 	return func(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
+		if strings.TrimSpace(identityFile) != "" {
+			return "", fmt.Errorf("live validation expected Tailscale SSH without an identity file, got %q", identityFile)
+		}
 		if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
 			return "", fmt.Errorf("create isolated SSH known_hosts directory: %w", err)
 		}
-		args := personalServerSSHCommandArgs(identityFile, user, host,
+		args := personalServerTailscaleSSHCommandArgs(user, host,
 			"-o", "BatchMode=yes",
 			"-o", "StrictHostKeyChecking=accept-new",
 			"-o", "UserKnownHostsFile="+knownHostsPath,
@@ -368,10 +388,12 @@ func (p *liveValidationConfigurePrompter) CanPrompt() bool {
 }
 
 func (p *liveValidationConfigurePrompter) Confirm(title string, affirmative bool) (bool, error) {
-	if title == "Create Personal Server?" {
+	switch title {
+	case "Allow Myn to edit Tailnet Policy?", "Create Personal Server?":
 		return true, nil
+	default:
+		return affirmative, nil
 	}
-	return affirmative, nil
 }
 
 func (p *liveValidationConfigurePrompter) Input(title string, defaultValue string, validate func(string) error) (string, error) {
@@ -506,8 +528,11 @@ func assertLiveValidationConfig(t *testing.T, cfg appConfig) {
 	if got := strings.TrimSpace(cfg.PersonalServer.User); got != liveValidationUser {
 		t.Fatalf("live validation Personal Server User mismatch: want %q, got %q", liveValidationUser, got)
 	}
-	if strings.TrimSpace(cfg.PersonalServer.IPv4) == "" {
-		t.Fatal("live validation did not save Personal Server IPv4")
+	if strings.TrimSpace(cfg.PersonalServer.TailscaleHost) == "" {
+		t.Fatal("live validation did not save Personal Server Tailscale Host")
+	}
+	if strings.TrimSpace(cfg.PersonalServer.IPv4) != "" {
+		t.Fatalf("live validation saved unsupported public IPv4 access path: %q", cfg.PersonalServer.IPv4)
 	}
 	if strings.TrimSpace(cfg.PersonalServer.IPv6) == "" {
 		t.Fatal("live validation did not save Personal Server IPv6")
@@ -526,15 +551,18 @@ func assertLiveValidationServer(t *testing.T, server *hcloud.Server, cfg appConf
 		t.Fatalf("live validation Server Type mismatch: want %q, got %#v", serverTypeName, server.ServerType)
 	}
 	assertLiveValidationLabels(t, "server", server.Labels)
-	if server.PublicNet.IPv4.IsUnspecified() || server.PublicNet.IPv4.IP.String() != cfg.PersonalServer.IPv4 {
-		t.Fatalf("live validation server IPv4 mismatch: config=%q live=%q", cfg.PersonalServer.IPv4, server.PublicNet.IPv4.IP.String())
+	if got := strings.TrimSpace(server.Labels["tailscale_host"]); got != cfg.PersonalServer.TailscaleHost {
+		t.Fatalf("live server tailscale_host label mismatch: want %q, got %q", cfg.PersonalServer.TailscaleHost, got)
+	}
+	if !server.PublicNet.IPv4.IsUnspecified() {
+		t.Fatalf("live validation server should have public IPv4 disabled, got %q", server.PublicNet.IPv4.IP.String())
 	}
 	if server.PublicNet.IPv6.IsUnspecified() || server.PublicNet.IPv6.IP.String() != cfg.PersonalServer.IPv6 {
 		t.Fatalf("live validation server IPv6 mismatch: config=%q live=%q", cfg.PersonalServer.IPv6, server.PublicNet.IPv6.IP.String())
 	}
 }
 
-func assertLiveValidationFirewall(t *testing.T, ctx context.Context, client *hcloud.Client, before *hcloud.Firewall, existed bool) {
+func assertLiveValidationFirewall(t *testing.T, ctx context.Context, client *hcloud.Client) {
 	t.Helper()
 	after, _, err := client.Firewall.GetByName(ctx, personalServerFirewallName)
 	if err != nil {
@@ -543,54 +571,36 @@ func assertLiveValidationFirewall(t *testing.T, ctx context.Context, client *hcl
 	if after == nil {
 		t.Fatal("live Personal Server Firewall was not found after configure")
 	}
-	if existed {
-		if before == nil || before.ID != after.ID {
-			t.Fatalf("live validation should reuse existing firewall: before=%#v after=%#v", before, after)
-		}
-		if !sameFirewallRules(before.Rules, after.Rules) {
-			t.Fatalf("live validation changed existing firewall rules: before=%v after=%v", firewallRuleSummaries(before.Rules), firewallRuleSummaries(after.Rules))
-		}
-		t.Logf("reused existing Personal Server Firewall %d and left rules untouched", after.ID)
-		return
-	}
-
 	assertLiveValidationLabels(t, "firewall", after.Labels)
-	if got, want := firewallRuleSummaries(after.Rules), []string{
-		"in tcp 22 0.0.0.0/0,::/0",
-		"in udp 60000-61000 0.0.0.0/0,::/0",
-	}; !equalStringSlices(got, want) {
+	if got, want := firewallRuleSummaries(after.Rules), []string{}; !equalStringSlices(got, want) {
 		t.Fatalf("new live Personal Server Firewall rules mismatch: want %v, got %v", want, got)
 	}
-	t.Logf("created Personal Server Firewall %d and intentionally left it in place", after.ID)
+	t.Logf("Personal Server Firewall %d has no public inbound rules", after.ID)
 }
 
-func assertLiveValidationSSHKey(t *testing.T, ctx context.Context, client *hcloud.Client, before *hcloud.SSHKey, existed bool, fingerprint string, publicKeyLine string) {
+func assertLiveValidationTailscaleDevice(t *testing.T, ctx context.Context, cfg appConfig) {
 	t.Helper()
-	after, _, err := client.SSHKey.GetByFingerprint(ctx, fingerprint)
+	client, err := newTailscaleAPIClient("", nil, cfg.Auth.Tailscale.Token, cfg.Auth.Tailscale.Tailnet)
 	if err != nil {
-		t.Fatalf("load live Personal Server SSH Key after configure: %v", err)
+		t.Fatalf("create live Tailscale client: %v", err)
 	}
-	if after == nil {
-		t.Fatal("live Personal Server SSH Key was not found after configure")
+	deviceClient := personalServerTailscaleAPIClient{client: client}
+	device, found, err := (personalServerProvisioningGate{}).findPersonalServerTailscaleDevice(ctx, deviceClient, cfg.PersonalServer.TailscaleHost)
+	if err != nil {
+		t.Fatalf("find live Personal Server Tailscale device: %v", err)
 	}
-	if existed {
-		if before == nil || before.ID != after.ID {
-			t.Fatalf("live validation should reuse existing SSH key: before=%#v after=%#v", before, after)
-		}
-		t.Logf("reused existing Personal Server SSH Key %d", after.ID)
-		return
+	if !found {
+		t.Fatalf("live Personal Server Tailscale device %q was not found", cfg.PersonalServer.TailscaleHost)
 	}
-
-	assertLiveValidationLabels(t, "ssh key", after.Labels)
-	if strings.TrimSpace(after.PublicKey) != strings.TrimSpace(publicKeyLine) {
-		t.Fatal("created live Personal Server SSH Key public key does not match isolated identity")
+	if err := personalServerTailscaleDeviceReadyError(device, cfg.PersonalServer.TailscaleHost); err != nil {
+		t.Fatalf("live Personal Server Tailscale device is not ready: %v", err)
 	}
-	t.Logf("created Personal Server SSH Key %d and intentionally left it in place", after.ID)
+	t.Logf("Tailscale device %q is tagged, authorized, and online", cfg.PersonalServer.TailscaleHost)
 }
 
-func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, identityPath string, knownHostsPath string, host string) {
+func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, knownHostsPath string, host string) {
 	t.Helper()
-	markerOutput := liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "cat "+personalServerBootstrapMarkerPath)
+	markerOutput := liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "cat "+personalServerBootstrapMarkerPath)
 	marker, err := parsePersonalServerBootstrapMarker(markerOutput)
 	if err != nil {
 		t.Fatalf("parse live Personal Server Bootstrap marker: %v", err)
@@ -615,18 +625,18 @@ func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, identityPa
 	}
 }
 
-func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, identityPath string, knownHostsPath string, host string) {
+func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, knownHostsPath string, host string) {
 	t.Helper()
-	liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "true")
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "id -un")); got != liveValidationUser {
+	liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "true")
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "id -un")); got != liveValidationUser {
 		t.Fatalf("live Personal Server User SSH mismatch: want %q, got %q", liveValidationUser, got)
 	}
 
-	passwd := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "getent passwd "+shellQuote(liveValidationUser)+" | cut -d: -f1,7"))
+	passwd := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "getent passwd "+shellQuote(liveValidationUser)+" | cut -d: -f1,7"))
 	if passwd != liveValidationUser+":/bin/bash" {
 		t.Fatalf("live Personal Server User passwd entry mismatch: %q", passwd)
 	}
-	groups := strings.Fields(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "id -nG "+shellQuote(liveValidationUser)))
+	groups := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "id -nG "+shellQuote(liveValidationUser)))
 	for _, group := range []string{"sudo", "docker"} {
 		if !containsString(groups, group) {
 			t.Fatalf("live Personal Server User missing %s group: %v", group, groups)
@@ -635,26 +645,32 @@ func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, identity
 
 	remoteRoot := "/home/" + liveValidationUser + "/" + liveValidationRemoteRoot
 	statCommand := "stat -c '%U:%G:%F' " + shellQuote(remoteRoot)
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, statCommand)); got != liveValidationUser+":"+liveValidationUser+":directory" {
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, statCommand)); got != liveValidationUser+":"+liveValidationUser+":directory" {
 		t.Fatalf("live remote project root mismatch: %q", got)
 	}
 
-	liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "docker --version && docker compose version")
-	nvmOutput := strings.Fields(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "source /etc/profile.d/myn-personal-server.sh && nvm version default && node --version"))
+	liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "docker --version && docker compose version")
+	nvmOutput := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "source /etc/profile.d/myn-personal-server.sh && nvm version default && node --version"))
 	if len(nvmOutput) < 2 || nvmOutput[0] == "N/A" || nvmOutput[0] != nvmOutput[1] {
 		t.Fatalf("live nvm default mismatch: %v", nvmOutput)
 	}
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.name")); got != liveValidationGitName {
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.name")); got != liveValidationGitName {
 		t.Fatalf("live Git user.name mismatch: want %q, got %q", liveValidationGitName, got)
 	}
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.email")); got != liveValidationGitEmail {
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "/home/linuxbrew/.linuxbrew/bin/git config --global user.email")); got != liveValidationGitEmail {
 		t.Fatalf("live Git user.email mismatch: want %q, got %q", liveValidationGitEmail, got)
+	}
+	if got := strings.Fields(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "systemctl is-active ssh sshd ssh.socket sshd.socket 2>/dev/null || true")); containsString(got, "active") {
+		t.Fatalf("system OpenSSH should be disabled, active units: %v", got)
+	}
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, knownHostsPath, liveValidationUser, host, "command -v mosh || true")); got != "" {
+		t.Fatalf("Mosh should not be installed, found %q", got)
 	}
 }
 
-func liveValidationSSH(t *testing.T, ctx context.Context, identityPath string, knownHostsPath string, user string, host string, command string) string {
+func liveValidationSSH(t *testing.T, ctx context.Context, knownHostsPath string, user string, host string, command string) string {
 	t.Helper()
-	output, err := liveValidationSSHRunner(knownHostsPath)(ctx, identityPath, user, host, command)
+	output, err := liveValidationSSHRunner(knownHostsPath)(ctx, "", user, host, command)
 	if err != nil {
 		t.Fatalf("run live SSH command as %s: %v", user, err)
 	}

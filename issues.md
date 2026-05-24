@@ -262,7 +262,7 @@ Type: HITL
 
 Suggested label: `ready-for-human`
 
-Status: Ready for Human (docs updated; live validation pending)
+Status: Ready for Human (docs and gated live harness updated; live validation pending)
 
 ## What to build
 
@@ -275,6 +275,7 @@ Update user-facing documentation and live validation so the Tailscale-only provi
 - [x] Docs explain saved Tailscale Credentials versus one-off Tailscale Machine Auth Keys.
 - [x] Docs explain required Tailscale API token capabilities and tailnet policy changes in user-facing language.
 - [x] Docs describe the legacy public-SSH migration break and expected migration message.
+- [x] Gated live validation harness uses Tailscale Credentials, LocalAPI, Tailnet Policy, one-off Machine Auth Keys, Tailscale SSH, IPv6-only server assertions, no-public-ingress firewall assertions, bootstrap marker checks, and billable server cleanup.
 - [ ] Live validation provisions an IPv6-only Tailscale Personal Server, verifies Tailscale device registration and SSH reachability, verifies bootstrap marker/tool setup, and cleans up the billable server.
 - [ ] Live validation verifies the firewall has no public inbound rules and no public SSH or Mosh access is documented as available.
 - [x] Live validation instructions document required Hetzner and Tailscale environment variables or secrets.

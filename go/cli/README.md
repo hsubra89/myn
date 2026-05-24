@@ -423,6 +423,13 @@ must be able to read, validate, and update Tailnet Policy, list devices, and
 create Machine Auth Keys for `TAILSCALE_TAILNET`. The local Tailscale daemon
 must be running and connected to the same tailnet.
 
+The gated live test exercises the same Tailscale-only provisioning path and
+cleans up the billable Hetzner server it creates:
+
+```sh
+MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v
+```
+
 For a smoke test, use an isolated config and run the product flow:
 
 ```sh

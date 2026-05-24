@@ -139,3 +139,12 @@
 - Replaced the stale live Hetzner validation section with human-run Tailscale-only live validation prerequisites and smoke-test checks, including required Hetzner and Tailscale secrets.
 - Updated Issue 10 status and checked off the completed documentation and live-validation-instruction acceptance criteria while leaving the real billable live smoke test pending for a human.
 - Verified with `git diff --check` and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
+
+2026-05-24
+
+- Selected the remaining agent-owned part of Issue 10 as the next highest-priority task because the checked-in live validation harness still exercised the old public-SSH provisioning model while the actual billable smoke test remains human-run.
+- Updated the gated live validation harness to require Hetzner and Tailscale credentials from `.env.local`, save both credentials through the auth flows, run configure without local SSH identity setup, allow Tailnet Policy editing, and use real LocalAPI/Tailscale cloud clients for the Tailscale-only provisioning path.
+- Changed live validation SSH checks to use ordinary Tailscale SSH as the Personal Server User with no identity file, and added assertions for saved Tailscale Host, no saved IPv4, IPv4-disabled Hetzner server, Tailscale Host labels, ready tagged Tailscale device, no public inbound firewall rules, successful bootstrap marker, disabled system OpenSSH, and no Mosh install.
+- Documented the gated `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v` command in `go/cli/README.md`.
+- Updated Issue 10 status and added the completed gated harness acceptance criterion while leaving the real billable live validation criteria pending for a human.
+- Verified with focused live-validation tests, `git diff --check`, and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
