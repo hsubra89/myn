@@ -1403,12 +1403,6 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if got, want := cloud.createdFirewall.Rules, []personalServerFirewallRule(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("created firewall rules mismatch: want %#v, got %#v", want, got)
 	}
-	if len(cloud.sshKeyFingerprints) != 0 {
-		t.Fatalf("Personal Server creation should not look up SSH keys, got %v", cloud.sshKeyFingerprints)
-	}
-	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) {
-		t.Fatalf("Personal Server creation should not create an SSH key, got %#v", cloud.createdSSHKey)
-	}
 	create := cloud.serverCreateRequest
 	if got, want := create.Name, "harish-personal-server"; got != want {
 		t.Fatalf("server create name mismatch: want %q, got %q", want, got)
@@ -1431,9 +1425,6 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 		"tailscale_host": "harish-personal-server",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("server create labels mismatch: want %v, got %v", want, got)
-	}
-	if got := create.SSHKeyID; got != 0 {
-		t.Fatalf("server create should not attach an SSH key, got %d", got)
 	}
 	if got, want := create.FirewallID, 2001; got != want {
 		t.Fatalf("server create firewall mismatch: want %d, got %d", want, got)
@@ -1463,7 +1454,7 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	}
 }
 
-func TestPersonalServerCreationDoesNotAttachHetznerSSHKey(t *testing.T) {
+func TestPersonalServerCreationPlanDoesNotShowSSHKey(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
 	cloud := successfulPersonalServerCloudClient()
 	gate := personalServerProvisioningGate{
@@ -1493,15 +1484,6 @@ func TestPersonalServerCreationDoesNotAttachHetznerSSHKey(t *testing.T) {
 		t.Fatalf("configure Personal Server: %v", err)
 	}
 
-	if len(cloud.sshKeyFingerprints) != 0 {
-		t.Fatalf("Personal Server creation should not look up Hetzner SSH keys, got %v", cloud.sshKeyFingerprints)
-	}
-	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) {
-		t.Fatalf("Personal Server creation should not create a Hetzner SSH key, got %#v", cloud.createdSSHKey)
-	}
-	if got := cloud.serverCreateRequest.SSHKeyID; got != 0 {
-		t.Fatalf("Personal Server create request should not attach an SSH key, got %d", got)
-	}
 	if strings.Contains(out.String(), "SSH key:") {
 		t.Fatalf("Personal Server plan should not show SSH key output, got %q", out.String())
 	}
@@ -1676,8 +1658,8 @@ func TestRunConfigureTailscaleMachineAuthKeyFailureStopsBeforeCloudResources(t *
 	if !strings.Contains(err.Error(), "create Tailscale Machine Auth Key: Tailscale API unavailable") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("auth key failure should stop before cloud resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("auth key failure should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 	cfg, err := loadAppConfig(configPath)
 	if err != nil {
@@ -2295,10 +2277,6 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 	if cloud.createdFirewall.ID == 0 {
 		t.Fatalf("supporting firewall should be left in place on cancellation, got %#v", cloud.createdFirewall)
 	}
-	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) || len(cloud.sshKeyFingerprints) != 0 {
-		t.Fatalf("cancellation path should not create or look up SSH keys, got created=%#v lookups=%v", cloud.createdSSHKey, cloud.sshKeyFingerprints)
-	}
-
 	cfg, err := loadAppConfig(configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -2522,8 +2500,8 @@ func TestRunConfigureFailsWhenPersonalServerNameAlreadyExists(t *testing.T) {
 	if !strings.Contains(err.Error(), `Personal Server name "harish-personal-server" already exists in Hetzner`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("duplicate name should stop before creating resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("duplicate name should stop before creating resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 	cfg, err := loadAppConfig(configPath)
 	if err != nil {
@@ -2829,12 +2807,12 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 	if !strings.Contains(err.Error(), "no non-deprecated Ubuntu system image is available") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("missing image should stop before creating resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("missing image should stop before creating resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 }
 
-func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
+func TestRunConfigureReusesExistingFirewall(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -2919,14 +2897,8 @@ func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 	if got, want := cloud.firewallsByName["myn-personal-server"].Rules, []personalServerFirewallRule(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("existing Myn-managed firewall rules should be reconciled: want %#v, got %#v", want, got)
 	}
-	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) || len(cloud.sshKeyFingerprints) != 0 {
-		t.Fatalf("Personal Server creation should not create or look up SSH keys, got created=%#v lookups=%v", cloud.createdSSHKey, cloud.sshKeyFingerprints)
-	}
 	if got, want := cloud.serverCreateRequest.FirewallID, existingFirewall.ID; got != want {
 		t.Fatalf("server create firewall mismatch: want %d, got %d", want, got)
-	}
-	if got := cloud.serverCreateRequest.SSHKeyID; got != 0 {
-		t.Fatalf("server create should not attach an SSH key, got %d", got)
 	}
 	if !strings.Contains(out.String(), "Firewall: myn-personal-server (existing Myn-managed firewall reconciled to no public inbound rules)") {
 		t.Fatalf("expected existing firewall caveat in output, got %q", out.String())
@@ -3049,7 +3021,6 @@ func TestCollectPersonalServerCreationInputsPromptsWhenUsernameCannotNormalize(t
 		ServerName:        inputs.ServerName,
 		GitIdentity:       inputs.GitIdentity,
 		RemoteProjectRoot: "projects",
-		SSHIdentityFile:   ".ssh/id_ed25519",
 	})
 	for _, want := range []string{
 		"- user.name: skipped (not configured)",
@@ -3397,9 +3368,6 @@ type fakePersonalServerCloudClient struct {
 	images                  []personalServerImage
 	firewallsByName         map[string]personalServerFirewall
 	createdFirewall         personalServerFirewall
-	sshKeysByFingerprint    map[string]personalServerSSHKey
-	sshKeyFingerprints      []string
-	createdSSHKey           personalServerSSHKey
 	serverCreateRequest     personalServerCreateServerRequest
 	createdServer           personalServerCloudServer
 	cancelAfterCreateServer func()
@@ -3713,29 +3681,6 @@ func (c *fakePersonalServerCloudClient) SetFirewallRules(ctx context.Context, fi
 	firewall.Rules = rules
 	c.firewallsByName[firewall.Name] = firewall
 	return []personalServerAction{{ID: 9002}}, nil
-}
-
-func (c *fakePersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
-	if err := c.recordContext(ctx); err != nil {
-		return personalServerSSHKey{}, false, err
-	}
-	c.sshKeyFingerprints = append(c.sshKeyFingerprints, fingerprint)
-	sshKey, ok := c.sshKeysByFingerprint[fingerprint]
-	return sshKey, ok, nil
-}
-
-func (c *fakePersonalServerCloudClient) CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error) {
-	if err := c.recordContext(ctx); err != nil {
-		return personalServerSSHKey{}, err
-	}
-	if c.events != nil {
-		*c.events = append(*c.events, "cloud.create-ssh-key")
-	}
-	if sshKey.ID == 0 {
-		sshKey.ID = 3001
-	}
-	c.createdSSHKey = sshKey
-	return sshKey, nil
 }
 
 func (c *fakePersonalServerCloudClient) CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {

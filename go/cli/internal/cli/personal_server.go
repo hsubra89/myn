@@ -49,8 +49,6 @@ type personalServerCreateCloudClient interface {
 	FirewallByName(ctx context.Context, name string) (personalServerFirewall, bool, error)
 	CreateFirewall(ctx context.Context, firewall personalServerFirewall) (personalServerFirewall, []personalServerAction, error)
 	SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error)
-	SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error)
-	CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error)
 	CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error)
 	WaitActions(ctx context.Context, actions []personalServerAction) error
 }
@@ -87,14 +85,6 @@ type personalServerFirewallRule struct {
 	SourceIPs []string
 }
 
-type personalServerSSHKey struct {
-	ID          int
-	Name        string
-	Fingerprint string
-	PublicKey   string
-	Labels      map[string]string
-}
-
 type personalServerAction struct {
 	ID     int
 	Status string
@@ -106,7 +96,6 @@ type personalServerCreateServerRequest struct {
 	ServerTypeName string
 	ImageID        int
 	ImageName      string
-	SSHKeyID       int
 	FirewallID     int
 	UserData       string
 	Labels         map[string]string
@@ -184,7 +173,6 @@ type personalServerCreationPlan struct {
 	PasswordHash      string
 	GitIdentity       personalServerGitIdentity
 	RemoteProjectRoot string
-	SSHIdentityFile   string
 	TailscaleIdentity string
 	TailnetPolicy     personalServerTailnetPolicyPlan
 	ExistingFirewall  bool
@@ -260,8 +248,6 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 
 func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfiguration(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter, state personalServerConnectionConfigState) error {
 	switch state {
-	case personalServerConnectionConfigMissingAddress:
-		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Personal Server address.")
 	case personalServerConnectionConfigMissingTailscaleHost:
 		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Tailscale Host.")
 	default:
@@ -555,8 +541,6 @@ func (gate personalServerProvisioningGate) renderPersonalServerBootstrap(input p
 
 const (
 	personalServerFirewallName         = "myn-personal-server"
-	personalServerMoshUDPPortRange     = "60000-61000"
-	personalServerSSHKeyName           = "myn-personal-server"
 	personalServerBootstrapMarkerPath  = "/var/lib/myn/personal-server-bootstrap.json"
 	defaultPersonalServerBootstrapWait = 5 * time.Minute
 	defaultPersonalServerTailscaleWait = 8 * time.Minute
@@ -764,28 +748,6 @@ func personalServerTailscaleDeviceMatchesHost(device personalServerTailscaleDevi
 	return false
 }
 
-func personalServerBootstrapMarkerUsers(user string) []string {
-	user = strings.TrimSpace(user)
-	if user == "" || user == "root" {
-		return []string{"root"}
-	}
-	return []string{"root", user}
-}
-
-func (gate personalServerProvisioningGate) waitForPersonalServerRootSSH(ctx context.Context, runner personalServerSSHRunner, identityFile string, host string) error {
-	for {
-		if _, err := runner(ctx, identityFile, "root", host, "true"); err == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := gate.personalServerSleep(ctx, gate.personalServerSSHPollInterval()); err != nil {
-			return err
-		}
-	}
-}
-
 func parsePersonalServerBootstrapMarker(output string) (personalServerBootstrapMarker, error) {
 	var marker personalServerBootstrapMarker
 	if err := json.Unmarshal([]byte(output), &marker); err != nil {
@@ -866,56 +828,6 @@ func writePersonalServerPartialFailures(out io.Writer, failures []string) {
 		}
 		fmt.Fprintf(out, "- %s\n", failure)
 	}
-}
-
-func writePersonalServerSSHCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "SSH commands:")
-	writePersonalServerSSHCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerSSHCommand(out, "root IPv4", plan.SSHIdentityFile, "root", server.IPv4)
-	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-	writePersonalServerSSHCommand(out, "root IPv6", plan.SSHIdentityFile, "root", server.IPv6)
-}
-
-func writePersonalServerUserSSHCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "SSH commands:")
-	writePersonalServerSSHCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-}
-
-func writePersonalServerSSHCommand(out io.Writer, label string, identityFile string, user string, host string) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		fmt.Fprintf(out, "- %s: unavailable\n", label)
-		return
-	}
-	if strings.TrimSpace(identityFile) == "" {
-		fmt.Fprintf(out, "- %s: %s\n", label, personalServerTailscaleSSHCommandText(user, host))
-		return
-	}
-	fmt.Fprintf(out, "- %s: %s\n", label, personalServerSSHCommandText("~/"+identityFile, user, host))
-}
-
-func writePersonalServerMoshCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "Mosh commands:")
-	writePersonalServerMoshCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerMoshCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-}
-
-func writePersonalServerMoshCommand(out io.Writer, label string, identityFile string, user string, host string) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		fmt.Fprintf(out, "- %s: unavailable\n", label)
-		return
-	}
-	if strings.TrimSpace(identityFile) == "" {
-		fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh\" %s@%s\n", label, user, host)
-		return
-	}
-	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/%s\" %s@%s\n", label, identityFile, user, host)
-}
-
-func personalServerBootstrapHost(server personalServerCloudServer) string {
-	return personalServerSSHHost(server.IPv4, server.IPv6)
 }
 
 func (gate personalServerProvisioningGate) personalServerSSHRunner() personalServerSSHRunner {
@@ -1170,40 +1082,6 @@ func personalServerFirewallExists(ctx context.Context, client personalServerCrea
 func personalServerFirewallIsMynManaged(firewall personalServerFirewall) bool {
 	labels := firewall.Labels
 	return labels["managed_by"] == "myn" && labels["role"] == "personal_server"
-}
-
-func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreateCloudClient, identity sshIdentityCandidate) (personalServerSSHKey, error) {
-	fingerprint, err := sshPublicKeyHetznerFingerprint(identity.PublicKey)
-	if err != nil {
-		return personalServerSSHKey{}, err
-	}
-
-	sshKey, found, err := client.SSHKeyByFingerprint(ctx, fingerprint)
-	if err != nil {
-		return personalServerSSHKey{}, fmt.Errorf("find Personal Server SSH Key: %w", err)
-	}
-	if found {
-		return sshKey, nil
-	}
-
-	sshKey, err = client.CreateSSHKey(ctx, personalServerSSHKey{
-		Name:        personalServerSSHKeyNameForFingerprint(fingerprint),
-		Fingerprint: fingerprint,
-		PublicKey:   identity.PublicKey.Line(),
-		Labels:      personalServerResourceLabels(),
-	})
-	if err != nil {
-		return personalServerSSHKey{}, fmt.Errorf("create Personal Server SSH Key: %w", err)
-	}
-	return sshKey, nil
-}
-
-func personalServerSSHKeyNameForFingerprint(fingerprint string) string {
-	fingerprint = strings.ReplaceAll(strings.TrimSpace(fingerprint), ":", "")
-	if fingerprint == "" {
-		return personalServerSSHKeyName
-	}
-	return personalServerSSHKeyName + "-" + fingerprint
 }
 
 func personalServerResourceLabels() map[string]string {
@@ -2022,29 +1900,6 @@ func (client hcloudPersonalServerCloudClient) SetFirewallRules(ctx context.Conte
 	return personalServerActionsFromHcloud(actions), nil
 }
 
-func (client hcloudPersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
-	sshKey, _, err := client.client.SSHKey.GetByFingerprint(ctx, fingerprint)
-	if err != nil {
-		return personalServerSSHKey{}, false, err
-	}
-	if sshKey == nil {
-		return personalServerSSHKey{}, false, nil
-	}
-	return personalServerSSHKeyFromHcloud(sshKey), true, nil
-}
-
-func (client hcloudPersonalServerCloudClient) CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error) {
-	created, _, err := client.client.SSHKey.Create(ctx, hcloud.SSHKeyCreateOpts{
-		Name:      sshKey.Name,
-		PublicKey: sshKey.PublicKey,
-		Labels:    sshKey.Labels,
-	})
-	if err != nil {
-		return personalServerSSHKey{}, err
-	}
-	return personalServerSSHKeyFromHcloud(created), nil
-}
-
 func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {
 	opts := hcloud.ServerCreateOpts{
 		Name:       request.Name,
@@ -2060,9 +1915,6 @@ func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, 
 			EnableIPv4: request.EnableIPv4,
 			EnableIPv6: request.EnableIPv6,
 		},
-	}
-	if request.SSHKeyID != 0 {
-		opts.SSHKeys = []*hcloud.SSHKey{{ID: int64(request.SSHKeyID)}}
 	}
 
 	result, _, err := client.client.Server.Create(ctx, opts)
@@ -2135,19 +1987,6 @@ func personalServerFirewallFromHcloud(firewall *hcloud.Firewall) personalServerF
 		})
 	}
 	return result
-}
-
-func personalServerSSHKeyFromHcloud(sshKey *hcloud.SSHKey) personalServerSSHKey {
-	if sshKey == nil {
-		return personalServerSSHKey{}
-	}
-	return personalServerSSHKey{
-		ID:          int(sshKey.ID),
-		Name:        sshKey.Name,
-		Fingerprint: sshKey.Fingerprint,
-		PublicKey:   sshKey.PublicKey,
-		Labels:      copyPersonalServerLabels(sshKey.Labels),
-	}
 }
 
 func personalServerActionsFromHcloud(actions []*hcloud.Action) []personalServerAction {

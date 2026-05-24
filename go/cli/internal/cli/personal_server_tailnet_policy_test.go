@@ -307,8 +307,8 @@ func TestRunConfigureDeclinedTailnetPolicyEditDoesNotCreateCloudResources(t *tes
 	if len(policy.validatedPolicies) != 0 || len(policy.appliedPolicies) != 0 {
 		t.Fatalf("declined edit should not validate or apply policy, got validates=%d applies=%d", len(policy.validatedPolicies), len(policy.appliedPolicies))
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("declined policy edit should stop before cloud resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("declined policy edit should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 	if !strings.Contains(out.String(), "Tailnet Policy edit declined. No cloud resources were created.") {
 		t.Fatalf("expected decline output, got %q", out.String())
@@ -392,8 +392,8 @@ func TestRunConfigureAppliesTailnetPolicyWithETagBeforeCloudResources(t *testing
 	if got, want := policy.appliedETags, []string{"etag-before-apply"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("applied ETags mismatch: want %#v, got %#v", want, got)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("policy apply conflict should stop before cloud resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("policy apply conflict should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 	if strings.Contains(out.String(), "etag conflict") {
 		t.Fatalf("low-level policy apply error should not be printed to stdout, got %q", out.String())
@@ -484,8 +484,8 @@ func TestRunConfigureReReadsNoopTailnetPolicyAfterFinalConfirmation(t *testing.T
 	if len(authKeys.requests) != 0 {
 		t.Fatalf("auth key should not be created after policy race: %#v", authKeys.requests)
 	}
-	if cloud.createdFirewall.ID != 0 || cloud.createdSSHKey.ID != 0 || cloud.serverCreateRequest.Name != "" {
-		t.Fatalf("policy race should stop before cloud resources, got firewall=%#v sshKey=%#v request=%#v", cloud.createdFirewall, cloud.createdSSHKey, cloud.serverCreateRequest)
+	if cloud.createdFirewall.ID != 0 || cloud.serverCreateRequest.Name != "" {
+		t.Fatalf("policy race should stop before cloud resources, got firewall=%#v request=%#v", cloud.createdFirewall, cloud.serverCreateRequest)
 	}
 }
 

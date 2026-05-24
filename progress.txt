@@ -166,3 +166,12 @@
 - Added focused coverage for the repository-root live-validation credential loader without using real credentials or creating cloud resources.
 - Updated Issue 12 status and acceptance criteria in `issues.md`.
 - Verified with the focused live-validation prerequisite tests, confirmed the ungated live test still skips, confirmed the enabled gate now fails clearly with the missing `TAILSCALE_API_TOKEN` message in this checkout, and ran `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 13 as the next highest-priority agent-owned task because Issue 10 is waiting on human live validation, and the code still carried dead public-SSH/Mosh provisioning surfaces from the old access model.
+- Removed dead Personal Server helpers that formatted public IPv4/IPv6 SSH and Mosh commands, selected public bootstrap hosts, and waited for root public SSH during bootstrap.
+- Removed the unused Personal Server Hetzner SSH Key lookup/create/attachment surface from the cloud boundary, hcloud adapter, create request, fakes, and tests.
+- Removed the old public-address connection classifier and public-host selection tests, leaving the Tailscale connection classifier as the active Personal Server connection path.
+- Updated Issue 13 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`, `git diff --check`, and a source scan confirming the removed public-SSH/Mosh helpers and SSH-key provisioning surface are absent from production CLI code.

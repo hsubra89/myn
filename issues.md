@@ -340,3 +340,26 @@ Make the gated Tailscale-only live validation fail clearly when `MYN_LIVE_TAILSC
 ## Blocked by
 
 None - can start immediately.
+
+## Issue 13: Remove stale public-SSH and Mosh provisioning surfaces
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Remove the remaining dead Personal Server provisioning surfaces from the old public SSH and Mosh model. New Tailscale-only provisioning should no longer carry helper code that formats public IPv4/IPv6 SSH or Mosh commands, chooses a public bootstrap host, waits for root public SSH, or exposes Hetzner SSH Key upload/attachment through the Personal Server cloud boundary.
+
+## Acceptance criteria
+
+- [x] Personal Server provisioning code no longer contains dead helpers that print public IPv4/IPv6 SSH or Mosh commands.
+- [x] Personal Server provisioning code no longer contains dead helpers for root public SSH bootstrap polling or public-address bootstrap host selection.
+- [x] The Personal Server creation cloud boundary no longer exposes Hetzner SSH Key lookup, creation, or attachment fields.
+- [x] Existing Tailscale-only provisioning, connection, and live-validation tests still pass.
+
+## Blocked by
+
+- Issue 11: Remove local SSH identity from Personal Server provisioning
