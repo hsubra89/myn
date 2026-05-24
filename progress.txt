@@ -1,0 +1,8 @@
+2026-05-24
+
+- Selected Issue 2 as the next highest-priority unblocked task because it removes the public SSH fallback from the existing Personal Server entry points without waiting for provisioning work.
+- Implemented Tailscale-only Personal Server Connections: `myn connect`, `myn connect-new`, and `myn sessions` now require `personalServer.user` plus `personalServer.tailscaleHost`, use ordinary `ssh` to that Tailscale Host, keep `StrictHostKeyChecking=accept-new`, and do not pass `-i` or `IdentitiesOnly=yes`.
+- Added legacy public-SSH Personal Server Configuration handling for connection commands: saved public IPv4/IPv6 without a Tailscale Host now fails with an explicit migration message instead of falling back to public addresses.
+- Preserved existing Project Session and tmux handoff behavior, including session numbering, terminal validation, quiet successful handoff, and SSH exit status preservation.
+- Updated Issue 2 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

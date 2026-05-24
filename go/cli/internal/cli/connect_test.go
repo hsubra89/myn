@@ -23,9 +23,10 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 		},
 		SSH: sshConfig{IdentityFile: identity.Relative},
 		PersonalServer: personalServerConfig{
-			ServerID: 123456,
-			User:     "harish",
-			IPv4:     "203.0.113.10",
+			ServerID:      123456,
+			User:          "harish",
+			TailscaleHost: "myn-dev",
+			IPv4:          "203.0.113.10",
 		},
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -69,10 +70,8 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "IdentitiesOnly=yes",
-		"-i", identity.PrivatePath,
 		"-l", "harish",
-		"203.0.113.10",
+		"myn-dev",
 		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
 			remotePath:        "Remote Projects",
 			remoteProjectRoot: "Remote Projects",
@@ -81,6 +80,59 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
 		t.Fatalf("ssh command mismatch:\nwant %#v\ngot  %#v", wantCommand, got)
+	}
+}
+
+func TestConnectUsesTailscaleHostWithoutSSHIdentity(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Projects: projectsConfig{
+			LocalRoot:  "projects",
+			RemoteRoot: "projects",
+		},
+		PersonalServer: personalServerConfig{
+			User:          "harish",
+			TailscaleHost: "myn-dev",
+			IPv4:          "203.0.113.10",
+			IPv6:          "2001:db8::10",
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	runner := &fakeConnectProcessRunner{}
+	err := runConnectCommand(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, nil, connectDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		workingDir: func() (string, error) {
+			return filepath.Join(home, "projects"), nil
+		},
+		stdinIsTerminal: func(io.Reader) bool {
+			return true
+		},
+		stdoutIsTerminal: func(io.Writer) bool {
+			return true
+		},
+		runProcess: runner.Run,
+	})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if len(runner.requests) != 1 {
+		t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
+	}
+	command := runner.requests[0].Command
+	assertConnectSSHLogin(t, command, "harish", "myn-dev")
+	for _, forbidden := range []string{"-i", "IdentitiesOnly=yes", "203.0.113.10", "2001:db8::10"} {
+		if containsString(command, forbidden) {
+			t.Fatalf("connect should use only the Tailscale Host without an identity file, got %#v", command)
+		}
 	}
 }
 
@@ -109,10 +161,8 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "IdentitiesOnly=yes",
-		"-i", fixture.identity.PrivatePath,
 		"-l", "harish",
-		"203.0.113.10",
+		"myn-dev",
 		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
 			remotePath:        "Remote Projects/acme/api/src",
 			remoteProjectRoot: "Remote Projects/acme",
@@ -130,8 +180,7 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t *testing.T) {
 	command := connectSSHCommand(connectPlan{
 		sshUser:           "harish",
-		sshHost:           "203.0.113.10",
-		sshIdentityPath:   "/home/harish/.ssh/id_ed25519",
+		sshHost:           "myn-dev",
 		remotePath:        "Remote Projects/acme/api/src",
 		remoteProjectRoot: "Remote Projects/acme",
 		tmuxSessionName:   "myn-remote-projects-acme",
@@ -141,10 +190,8 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "IdentitiesOnly=yes",
-		"-i", "/home/harish/.ssh/id_ed25519",
 		"-l", "harish",
-		"203.0.113.10",
+		"myn-dev",
 		"bash", "-lc", shellQuote(connectRemoteAutoCommand(connectPlan{
 			remotePath:        "Remote Projects/acme/api/src",
 			remoteProjectRoot: "Remote Projects/acme",
@@ -156,7 +203,7 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 	}
 }
 
-func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
+func TestPlanPersonalServerConnectionSelectsSavedTailscaleHost(t *testing.T) {
 	tests := []struct {
 		name         string
 		personal     personalServerConfig
@@ -164,25 +211,25 @@ func TestPlanPersonalServerConnectionSelectsSavedAddress(t *testing.T) {
 		wantSSHHost  string
 	}{
 		{
-			name: "prefers IPv4 before IPv6",
+			name: "uses Tailscale Host even when public addresses are saved",
 			personal: personalServerConfig{
-				ServerID: 123456,
-				User:     "harish",
-				IPv4:     "203.0.113.10",
-				IPv6:     "2001:db8::10",
+				ServerID:      123456,
+				User:          "harish",
+				TailscaleHost: "myn-dev",
+				IPv4:          "203.0.113.10",
+				IPv6:          "2001:db8::10",
 			},
-			wantPlanHost: "203.0.113.10",
-			wantSSHHost:  "203.0.113.10",
+			wantPlanHost: "myn-dev",
+			wantSSHHost:  "myn-dev",
 		},
 		{
-			name: "falls back to unbracketed IPv6 host with separate login user",
+			name: "does not require saved server ID",
 			personal: personalServerConfig{
-				ServerID: 123456,
-				User:     "harish",
-				IPv6:     "2001:db8::10",
+				User:          "harish",
+				TailscaleHost: "myn-dev",
 			},
-			wantPlanHost: "2001:db8::10",
-			wantSSHHost:  "2001:db8::10",
+			wantPlanHost: "myn-dev",
+			wantSSHHost:  "myn-dev",
 		},
 	}
 
@@ -228,6 +275,17 @@ func assertConnectSSHLogin(t *testing.T, command []string, user string, host str
 		}
 	}
 	t.Fatalf("SSH login args missing: want -l %q %q in %#v", user, host, command)
+}
+
+func assertConnectCommandUsesTailscaleHostOnly(t *testing.T, command []string) {
+	t.Helper()
+
+	assertConnectSSHLogin(t, command, "harish", "myn-dev")
+	for _, forbidden := range []string{"-i", "IdentitiesOnly=yes", "203.0.113.10"} {
+		if containsString(command, forbidden) {
+			t.Fatalf("connect should use only the Tailscale Host without an identity file, got %#v", command)
+		}
+	}
 }
 
 func TestConnectTmuxSessionNameNormalizesRemoteProjectRoot(t *testing.T) {
@@ -444,6 +502,7 @@ func TestConnectCommandAndAliasRouteToSameBehavior(t *testing.T) {
 			if len(runner.requests) != 1 {
 				t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 			}
+			assertConnectCommandUsesTailscaleHostOnly(t, runner.requests[0].Command)
 		})
 	}
 }
@@ -470,6 +529,7 @@ func TestConnectNewCommandAndAliasRouteToSameBehavior(t *testing.T) {
 			if len(runner.requests) != 1 {
 				t.Fatalf("process run count mismatch: want 1, got %d", len(runner.requests))
 			}
+			assertConnectCommandUsesTailscaleHostOnly(t, runner.requests[0].Command)
 			remoteCommand := runner.requests[0].Command[len(runner.requests[0].Command)-1]
 			if !strings.Contains(remoteCommand, "highest_number") || !strings.Contains(remoteCommand, `exec tmux new-session -s "$new_session"`) {
 				t.Fatalf("connect-new should create the next Project Session, got %#v", runner.requests[0].Command)
@@ -507,6 +567,7 @@ func TestSessionsCommandAndAliasesRouteToSameBehavior(t *testing.T) {
 			if containsString(command, "-t") {
 				t.Fatalf("sessions should not request a TTY, got %#v", command)
 			}
+			assertConnectCommandUsesTailscaleHostOnly(t, command)
 		})
 	}
 }
@@ -546,10 +607,8 @@ func TestConnectWithSessionNumberAttachesExistingProjectSessionOnly(t *testing.T
 		"ssh",
 		"-t",
 		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "IdentitiesOnly=yes",
-		"-i", fixture.identity.PrivatePath,
 		"-l", "harish",
-		"203.0.113.10",
+		"myn-dev",
 		"bash", "-lc", shellQuote(wantRemoteCommand),
 	}
 	if got := runner.requests[0].Command; !reflect.DeepEqual(got, wantCommand) {
@@ -685,11 +744,12 @@ func TestConnectValidatesLocalPreconditionsBeforeSSH(t *testing.T) {
 			want: "remote project root is not configured",
 		},
 		{
-			name: "missing configured SSH identity",
+			name: "legacy public SSH Personal Server Configuration",
 			mutateCfg: func(cfg *appConfig) {
-				cfg.SSH.IdentityFile = ""
+				cfg.PersonalServer.TailscaleHost = ""
+				cfg.PersonalServer.IPv4 = "203.0.113.10"
 			},
-			want: "SSH identity is not configured",
+			want: "legacy public-SSH Personal Server Configuration",
 		},
 		{
 			name: "missing Personal Server Configuration",
@@ -706,12 +766,13 @@ func TestConnectValidatesLocalPreconditionsBeforeSSH(t *testing.T) {
 			want: "Personal Server Configuration is incomplete",
 		},
 		{
-			name: "missing saved address",
+			name: "missing Tailscale Host",
 			mutateCfg: func(cfg *appConfig) {
+				cfg.PersonalServer.TailscaleHost = ""
 				cfg.PersonalServer.IPv4 = ""
 				cfg.PersonalServer.IPv6 = ""
 			},
-			want: "missing a saved Personal Server address",
+			want: "missing a saved Tailscale Host",
 		},
 		{
 			name: "missing local root directory",
@@ -721,15 +782,6 @@ func TestConnectValidatesLocalPreconditionsBeforeSSH(t *testing.T) {
 				}
 			},
 			want: "local project root must be an existing directory",
-		},
-		{
-			name: "missing SSH identity file",
-			setup: func(fixture connectTestFixture) {
-				if err := os.Remove(fixture.identity.PrivatePath); err != nil {
-					t.Fatalf("remove SSH identity: %v", err)
-				}
-			},
-			want: "SSH identity file does not exist",
 		},
 		{
 			name: "non-terminal stdin",
@@ -837,6 +889,11 @@ func TestConnectUsesSSHWithoutHetznerCredentialsOrLeases(t *testing.T) {
 			t.Fatalf("connect should not use Mosh Access, got %#v", command)
 		}
 	}
+	for _, forbidden := range []string{"-i", "IdentitiesOnly=yes"} {
+		if containsString(command, forbidden) {
+			t.Fatalf("connect should not pass a configured SSH identity, got %#v", command)
+		}
+	}
 	entries, err := os.ReadDir(leaseDir)
 	if err != nil {
 		t.Fatalf("read lease directory: %v", err)
@@ -884,9 +941,10 @@ func newConnectTestFixture(t *testing.T) connectTestFixture {
 		},
 		SSH: sshConfig{IdentityFile: identity.Relative},
 		PersonalServer: personalServerConfig{
-			ServerID: 123456,
-			User:     "harish",
-			IPv4:     "203.0.113.10",
+			ServerID:      123456,
+			User:          "harish",
+			TailscaleHost: "myn-dev",
+			IPv4:          "203.0.113.10",
 		},
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -908,9 +966,10 @@ func (fixture connectTestFixture) validConfig() appConfig {
 		},
 		SSH: sshConfig{IdentityFile: fixture.identity.Relative},
 		PersonalServer: personalServerConfig{
-			ServerID: 123456,
-			User:     "harish",
-			IPv4:     "203.0.113.10",
+			ServerID:      123456,
+			User:          "harish",
+			TailscaleHost: "myn-dev",
+			IPv4:          "203.0.113.10",
 		},
 	}
 }

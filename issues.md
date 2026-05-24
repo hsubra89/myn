@@ -33,19 +33,21 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Change Personal Server connection planning so `myn connect`, `myn connect-new`, and `myn sessions` use the saved Tailscale Host directly through ordinary `ssh`. Remove SSH identity and public address requirements from the connection path, and make legacy public-SSH Personal Server Configurations fail with a clear migration message.
 
 ## Acceptance criteria
 
-- [ ] A complete connection config requires `personalServer.user` and `personalServer.tailscaleHost`.
-- [ ] `myn connect`, `myn connect-new`, and `myn sessions` call ordinary `ssh` with the Personal Server User and Tailscale Host.
-- [ ] SSH commands keep `StrictHostKeyChecking=accept-new` and do not pass `-i` or require an SSH identity file.
-- [ ] Public IPv4 and IPv6 are not used as fallback connection hosts.
-- [ ] Existing Project Session behavior, tmux handoff, session numbering, terminal validation, and quiet successful handoff behavior are preserved.
-- [ ] Legacy configs that have public addresses but no Tailscale Host fail with an explicit migration message.
-- [ ] Tests cover command construction, config validation, legacy migration failure, `connect`, `connect-new`, and `sessions`.
+- [x] A complete connection config requires `personalServer.user` and `personalServer.tailscaleHost`.
+- [x] `myn connect`, `myn connect-new`, and `myn sessions` call ordinary `ssh` with the Personal Server User and Tailscale Host.
+- [x] SSH commands keep `StrictHostKeyChecking=accept-new` and do not pass `-i` or require an SSH identity file.
+- [x] Public IPv4 and IPv6 are not used as fallback connection hosts.
+- [x] Existing Project Session behavior, tmux handoff, session numbering, terminal validation, and quiet successful handoff behavior are preserved.
+- [x] Legacy configs that have public addresses but no Tailscale Host fail with an explicit migration message.
+- [x] Tests cover command construction, config validation, legacy migration failure, `connect`, `connect-new`, and `sessions`.
 
 ## Blocked by
 

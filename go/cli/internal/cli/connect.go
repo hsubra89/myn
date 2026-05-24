@@ -39,7 +39,6 @@ type connectProcessRequest struct {
 type connectPlan struct {
 	sshUser           string
 	sshHost           string
-	sshIdentityPath   string
 	remotePath        string
 	remoteProjectRoot string
 	tmuxSessionName   string
@@ -235,10 +234,7 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 	if strings.TrimSpace(cfg.Projects.RemoteRoot) == "" {
 		return connectPlan{}, fmt.Errorf("remote project root is not configured; run `myn configure`")
 	}
-	if strings.TrimSpace(cfg.SSH.IdentityFile) == "" {
-		return connectPlan{}, fmt.Errorf("SSH identity is not configured; run `myn configure`")
-	}
-	connectionState, connectionConfig := cfg.PersonalServer.connectionConfigState()
+	connectionState, connectionConfig := cfg.PersonalServer.tailscaleConnectionConfigState()
 	if connectionState != personalServerConnectionConfigReady {
 		return connectPlan{}, connectionState.validationError()
 	}
@@ -248,14 +244,6 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 		return connectPlan{}, err
 	}
 	if err := validateExistingDirectory(deps.stat, localRootPath, "local project root"); err != nil {
-		return connectPlan{}, err
-	}
-
-	_, identityPath, err := normalizeSSHIdentityFile(cfg.SSH.IdentityFile, home, deps.stat)
-	if err != nil {
-		return connectPlan{}, err
-	}
-	if err := validateExistingRegularFile(deps.stat, identityPath, "SSH identity file"); err != nil {
 		return connectPlan{}, err
 	}
 
@@ -283,7 +271,6 @@ func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) 
 	return connectPlan{
 		sshUser:           connectionConfig.User,
 		sshHost:           connectionConfig.Host,
-		sshIdentityPath:   identityPath,
 		remotePath:        remotePath,
 		remoteProjectRoot: remoteProjectRoot,
 		tmuxSessionName:   connectTmuxSessionName(remoteProjectRoot),
@@ -319,23 +306,8 @@ func validateExistingDirectory(stat func(string) (os.FileInfo, error), value str
 	return nil
 }
 
-func validateExistingRegularFile(stat func(string) (os.FileInfo, error), value string, name string) error {
-	info, err := stat(value)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%s does not exist", name)
-		}
-		return fmt.Errorf("check %s: %w", name, err)
-	}
-	if info.IsDir() || !info.Mode().IsRegular() {
-		return fmt.Errorf("%s must be a regular file", name)
-	}
-	return nil
-}
-
 func connectSSHCommand(plan connectPlan, mode connectProjectSessionMode, sessionNumber int) []string {
-	command := personalServerSSHCommandArgs(
-		plan.sshIdentityPath,
+	command := personalServerTailscaleSSHCommandArgs(
 		plan.sshUser,
 		plan.sshHost,
 		"-t",
@@ -345,8 +317,7 @@ func connectSSHCommand(plan connectPlan, mode connectProjectSessionMode, session
 }
 
 func sessionsSSHCommand(plan connectPlan) []string {
-	command := personalServerSSHCommandArgs(
-		plan.sshIdentityPath,
+	command := personalServerTailscaleSSHCommandArgs(
 		plan.sshUser,
 		plan.sshHost,
 		"-o", "StrictHostKeyChecking=accept-new",

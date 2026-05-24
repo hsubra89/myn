@@ -23,6 +23,15 @@ func personalServerSSHCommandArgs(identityFile string, user string, host string,
 	return args
 }
 
+func personalServerTailscaleSSHCommandArgs(user string, host string, options ...string) []string {
+	args := append([]string{"ssh"}, options...)
+	args = append(args,
+		"-l", strings.TrimSpace(user),
+		strings.TrimSpace(host),
+	)
+	return args
+}
+
 func personalServerSSHCommandText(identityFile string, user string, host string) string {
 	return fmt.Sprintf("ssh -o IdentitiesOnly=yes -i %s -l %s %s", identityFile, strings.TrimSpace(user), strings.TrimSpace(host))
 }

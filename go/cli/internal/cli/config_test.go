@@ -171,3 +171,66 @@ func TestPersonalServerConfigurationClassifiesConnectionReadiness(t *testing.T) 
 		})
 	}
 }
+
+func TestPersonalServerConfigurationClassifiesTailscaleConnectionReadiness(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    personalServerConfig
+		wantState personalServerConnectionConfigState
+		want      personalServerConnectionConfig
+	}{
+		{
+			name:      "absent",
+			wantState: personalServerConnectionConfigAbsent,
+		},
+		{
+			name: "missing Personal Server User is incomplete",
+			config: personalServerConfig{
+				TailscaleHost: "myn-dev",
+			},
+			wantState: personalServerConnectionConfigIncomplete,
+		},
+		{
+			name: "missing Tailscale Host",
+			config: personalServerConfig{
+				User: "harish",
+			},
+			wantState: personalServerConnectionConfigMissingTailscaleHost,
+		},
+		{
+			name: "legacy public SSH config",
+			config: personalServerConfig{
+				ServerID: 123456,
+				User:     "harish",
+				IPv4:     "203.0.113.10",
+			},
+			wantState: personalServerConnectionConfigLegacyPublicSSH,
+		},
+		{
+			name: "ready with Tailscale Host",
+			config: personalServerConfig{
+				User:          " harish ",
+				TailscaleHost: " myn-dev ",
+				IPv4:          "203.0.113.10",
+				IPv6:          "2001:db8::1",
+			},
+			wantState: personalServerConnectionConfigReady,
+			want: personalServerConnectionConfig{
+				User: "harish",
+				Host: "myn-dev",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotState, got := tt.config.tailscaleConnectionConfigState()
+			if gotState != tt.wantState {
+				t.Fatalf("state mismatch: want %v, got %v", tt.wantState, gotState)
+			}
+			if got != tt.want {
+				t.Fatalf("connection config mismatch: want %#v, got %#v", tt.want, got)
+			}
+		})
+	}
+}
