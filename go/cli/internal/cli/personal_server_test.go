@@ -597,6 +597,90 @@ func TestRunConfigureFailsWhenLocalTailnetMismatchesSavedCredentials(t *testing.
 	}
 }
 
+func TestPersonalServerPreviewDoesNotRequireConfiguredSSHIdentity(t *testing.T) {
+	cloud := successfulPersonalServerCloudClient()
+	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return cloud
+		},
+	}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		passwords: []string{"server-secret", "server-secret"},
+	}
+
+	var out bytes.Buffer
+	if err := gate.Configure(context.Background(), &out, filepath.Join(t.TempDir(), "config.json"), appConfig{
+		Auth: testPersonalServerAuthConfig(),
+		Projects: projectsConfig{
+			RemoteRoot: "projects",
+		},
+	}, prompter); err != nil {
+		t.Fatalf("configure Personal Server: %v", err)
+	}
+
+	if cloud.listLocations == 0 {
+		t.Fatal("Personal Server preview should run without a configured SSH identity")
+	}
+	if strings.Contains(out.String(), "SSH identity is not configured") {
+		t.Fatalf("Personal Server preview should not be skipped for missing SSH identity, got %q", out.String())
+	}
+}
+
+func TestRunConfigureDoesNotPromptForSSHIdentityForPersonalServerProvisioning(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := successfulPersonalServerCloudClient()
+	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return cloud
+		},
+	}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		passwords: []string{"server-secret", "server-secret"},
+		confirms:  []bool{false},
+	}
+
+	var out bytes.Buffer
+	if err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter:                  prompter,
+		personalServerProvisioner: gate,
+	}); err != nil {
+		t.Fatalf("run configure: %v", err)
+	}
+
+	if len(prompter.sshCalls) != 0 {
+		t.Fatalf("configure should not prompt for SSH identity during Personal Server provisioning, got %#v", prompter.sshCalls)
+	}
+	if got, want := prompter.confirmCalls, []string{"Create Personal Server?"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("confirm calls mismatch: want %v, got %v", want, got)
+	}
+	if !strings.Contains(out.String(), "SSH identity: not configured") {
+		t.Fatalf("expected SSH identity to remain unconfigured, got %q", out.String())
+	}
+}
+
 func TestRunConfigureDoesNotAutoAdoptPersonalServerWithoutSavedConfiguration(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
@@ -877,7 +961,6 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Server Type: cx32",
 		"Server name: harish-dev",
 		"Personal Server User: harish-subra",
-		"SSH key: ~/.ssh/id_ed25519",
 		"Firewall: myn-personal-server (inbound SSH and Mosh UDP 60000-61000 over IPv4 and IPv6)",
 		"Public network: IPv4 and IPv6 enabled",
 		"Remote project root: ~/Remote Projects",
@@ -1102,17 +1185,11 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("created firewall rules mismatch: want %#v, got %#v", want, got)
 	}
-	if got, want := cloud.createdSSHKey.PublicKey, strings.TrimSpace(identity.PublicLine); got != want {
-		t.Fatalf("created SSH key public key mismatch: want %q, got %q", want, got)
+	if len(cloud.sshKeyFingerprints) != 0 {
+		t.Fatalf("Personal Server creation should not look up SSH keys, got %v", cloud.sshKeyFingerprints)
 	}
-	if got, want := cloud.createdSSHKey.Name, "myn-personal-server-"+strings.ReplaceAll(identity.HetznerFingerprint, ":", ""); got != want {
-		t.Fatalf("created SSH key name mismatch: want %q, got %q", want, got)
-	}
-	if got, want := cloud.sshKeyFingerprints, []string{identity.HetznerFingerprint}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("SSH key fingerprint lookup mismatch: want %v, got %v", want, got)
-	}
-	if got, want := cloud.createdSSHKey.Labels, personalServerResourceLabels(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("created SSH key labels mismatch: want %v, got %v", want, got)
+	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) {
+		t.Fatalf("Personal Server creation should not create an SSH key, got %#v", cloud.createdSSHKey)
 	}
 	create := cloud.serverCreateRequest
 	if got, want := create.Name, "harish-personal-server"; got != want {
@@ -1133,8 +1210,8 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if got, want := create.Labels, personalServerResourceLabels(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("server create labels mismatch: want %v, got %v", want, got)
 	}
-	if got, want := create.SSHKeyID, 3001; got != want {
-		t.Fatalf("server create SSH key mismatch: want %d, got %d", want, got)
+	if got := create.SSHKeyID; got != 0 {
+		t.Fatalf("server create should not attach an SSH key, got %d", got)
 	}
 	if got, want := create.FirewallID, 2001; got != want {
 		t.Fatalf("server create firewall mismatch: want %d, got %d", want, got)
@@ -1155,6 +1232,49 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	}
 	if !strings.Contains(out.String(), "Personal Server created: server 654321.") {
 		t.Fatalf("expected created output, got %q", out.String())
+	}
+}
+
+func TestPersonalServerCreationDoesNotAttachHetznerSSHKey(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	cloud := successfulPersonalServerCloudClient()
+	gate := personalServerProvisioningGate{
+		newLocalTailscaleClient: testPersonalServerLocalTailscaleClient,
+		newCloudClient: func(string) personalServerCloudClient {
+			return cloud
+		},
+		newTailscaleMachineAuthKeyClient: testPersonalServerMachineAuthKeyClient,
+		saveConfig:                       saveAppConfig,
+		runSSH:                           newSuccessfulPersonalServerSSHRunner().Run,
+	}
+	prompter := &fakeConfigurePrompter{
+		canPrompt: true,
+		inputs:    []string{"harish", "harish-personal-server"},
+		passwords: []string{"server-secret", "server-secret"},
+		confirms:  []bool{true},
+	}
+
+	var out bytes.Buffer
+	if err := gate.Configure(context.Background(), &out, configPath, appConfig{
+		Auth: testPersonalServerAuthConfig(),
+		Projects: projectsConfig{
+			RemoteRoot: "projects",
+		},
+	}, prompter); err != nil {
+		t.Fatalf("configure Personal Server: %v", err)
+	}
+
+	if len(cloud.sshKeyFingerprints) != 0 {
+		t.Fatalf("Personal Server creation should not look up Hetzner SSH keys, got %v", cloud.sshKeyFingerprints)
+	}
+	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) {
+		t.Fatalf("Personal Server creation should not create a Hetzner SSH key, got %#v", cloud.createdSSHKey)
+	}
+	if got := cloud.serverCreateRequest.SSHKeyID; got != 0 {
+		t.Fatalf("Personal Server create request should not attach an SSH key, got %d", got)
+	}
+	if strings.Contains(out.String(), "SSH key:") {
+		t.Fatalf("Personal Server plan should not show SSH key output, got %q", out.String())
 	}
 }
 
@@ -1238,7 +1358,6 @@ func TestRunConfigureCreatesTailscaleMachineAuthKeyAfterPolicyBeforeCloudResourc
 		"tailscale.auth-key",
 		"bootstrap.render",
 		"cloud.create-firewall",
-		"cloud.create-ssh-key",
 		"cloud.create-server",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("event order mismatch: want %#v, got %#v", want, got)
@@ -1425,8 +1544,8 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1443,19 +1562,19 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Claude Code install failed",
 		"SSH commands:",
-		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
-		"- user IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 2001:db8::55",
+		"- user IPv4: ssh -l harish 203.0.113.55",
+		"- user IPv6: ssh -l harish 2001:db8::55",
 		"Mosh commands:",
-		"- user IPv4: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@203.0.113.55",
-		"- user IPv6: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519\" harish@2001:db8::55",
+		"- user IPv4: mosh --ssh=\"ssh\" harish@203.0.113.55",
+		"- user IPv6: mosh --ssh=\"ssh\" harish@2001:db8::55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
 	}
 	for _, forbidden := range []string{
-		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
-		"- root IPv6: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 2001:db8::55",
+		"- root IPv4: ssh -l root 203.0.113.55",
+		"- root IPv6: ssh -l root 2001:db8::55",
 	} {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("successful bootstrap should not print root SSH command %q, got %q", forbidden, output)
@@ -1527,9 +1646,9 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1611,11 +1730,11 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "true"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: "", user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1700,7 +1819,7 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Codex install failed",
 		"SSH commands:",
-		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- root IPv4: ssh -l root 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1786,7 +1905,7 @@ func TestRunConfigureReportsBootstrapTimeoutButKeepsSavedServer(t *testing.T) {
 	for _, want := range []string{
 		"Personal Server bootstrap failed: timed out waiting for Personal Server Bootstrap marker",
 		"SSH commands:",
-		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
+		"- user IPv4: ssh -l harish 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
@@ -1916,8 +2035,11 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 	if cloud.serverCreateRequest.Name == "" {
 		t.Fatal("expected cancellation to happen after server creation")
 	}
-	if cloud.createdFirewall.ID == 0 || cloud.createdSSHKey.ID == 0 {
-		t.Fatalf("supporting resources should be left in place on cancellation, got firewall=%#v sshKey=%#v", cloud.createdFirewall, cloud.createdSSHKey)
+	if cloud.createdFirewall.ID == 0 {
+		t.Fatalf("supporting firewall should be left in place on cancellation, got %#v", cloud.createdFirewall)
+	}
+	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) || len(cloud.sshKeyFingerprints) != 0 {
+		t.Fatalf("cancellation path should not create or look up SSH keys, got created=%#v lookups=%v", cloud.createdSSHKey, cloud.sshKeyFingerprints)
 	}
 
 	cfg, err := loadAppConfig(configPath)
@@ -2223,7 +2345,7 @@ func TestRunConfigureFailsWhenNoUbuntuSystemImageIsAvailable(t *testing.T) {
 	}
 }
 
-func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
+func TestRunConfigureReusesExistingFirewallWithoutSSHKey(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -2241,12 +2363,6 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 			{Direction: "in", Protocol: "tcp", Port: "2222", SourceIPs: []string{"198.51.100.0/24"}},
 		},
 	}
-	existingSSHKey := personalServerSSHKey{
-		ID:          3333,
-		Name:        "existing-key",
-		Fingerprint: identity.HetznerFingerprint,
-		PublicKey:   strings.TrimSpace(identity.PublicLine),
-	}
 	cloud := &fakePersonalServerCloudClient{
 		locations: []personalServerLocation{{Name: "ash", Description: "Ashburn, VA, USA"}},
 		serverTypes: []personalServerType{
@@ -2257,9 +2373,6 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 		},
 		firewallsByName: map[string]personalServerFirewall{
 			"myn-personal-server": existingFirewall,
-		},
-		sshKeysByFingerprint: map[string]personalServerSSHKey{
-			identity.HetznerFingerprint: existingSSHKey,
 		},
 		createdServer: personalServerCloudServer{
 			ID:   654321,
@@ -2315,14 +2428,14 @@ func TestRunConfigureReusesExistingFirewallAndSSHKey(t *testing.T) {
 	if got, want := cloud.firewallsByName["myn-personal-server"].Rules, existingFirewall.Rules; !reflect.DeepEqual(got, want) {
 		t.Fatalf("existing firewall rules should be left untouched: want %#v, got %#v", want, got)
 	}
-	if cloud.createdSSHKey.ID != 0 {
-		t.Fatalf("expected existing SSH key to be reused, created %#v", cloud.createdSSHKey)
+	if !reflect.DeepEqual(cloud.createdSSHKey, personalServerSSHKey{}) || len(cloud.sshKeyFingerprints) != 0 {
+		t.Fatalf("Personal Server creation should not create or look up SSH keys, got created=%#v lookups=%v", cloud.createdSSHKey, cloud.sshKeyFingerprints)
 	}
 	if got, want := cloud.serverCreateRequest.FirewallID, existingFirewall.ID; got != want {
 		t.Fatalf("server create firewall mismatch: want %d, got %d", want, got)
 	}
-	if got, want := cloud.serverCreateRequest.SSHKeyID, existingSSHKey.ID; got != want {
-		t.Fatalf("server create SSH key mismatch: want %d, got %d", want, got)
+	if got := cloud.serverCreateRequest.SSHKeyID; got != 0 {
+		t.Fatalf("server create should not attach an SSH key, got %d", got)
 	}
 	if !strings.Contains(out.String(), "Firewall: myn-personal-server (existing rules reused unchanged; Mosh may require inbound UDP 60000-61000)") {
 		t.Fatalf("expected existing firewall caveat in output, got %q", out.String())

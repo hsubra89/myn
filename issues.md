@@ -190,8 +190,7 @@ Change Hetzner provisioning so new Personal Servers are IPv6-only from the publi
 
 ## Blocked by
 
-- Issue 6: Render Tailscale-first Personal Server Bootstrap
-- Issue 11: Remove local SSH identity from Personal Server provisioning
+None - can start immediately.
 
 ## Issue 8: Orchestrate Tailscale-only configure completion
 
@@ -283,7 +282,6 @@ Update user-facing documentation and live validation so the Tailscale-only provi
 - Issue 7: Provision IPv6-only Hetzner servers with no public ingress
 - Issue 8: Orchestrate Tailscale-only configure completion
 - Issue 9: Verify existing Tailscale Personal Server configuration
-- Issue 11: Remove local SSH identity from Personal Server provisioning
 
 ## Issue 11: Remove local SSH identity from Personal Server provisioning
 
@@ -291,19 +289,21 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Finish removing the legacy local SSH identity dependency from new Personal Server creation. `myn configure` should not require or generate a local SSH identity before entering Personal Server provisioning, and Hetzner server creation should not upload or attach a Myn SSH Key. This completes the PRD objective that provisioning is tied to Tailscale identity rather than local key material.
 
 ## Acceptance criteria
 
-- [ ] Personal Server creation is not skipped when `ssh.identityFile` is empty, as long as Hetzner Credentials, Tailscale Credentials, and LocalAPI preflight are valid.
-- [ ] Interactive configure no longer prompts to generate, select, add, or validate an SSH identity solely for Personal Server provisioning.
-- [ ] Hetzner server creation does not create, reuse, upload, or attach a `myn-personal-server` SSH Key for new Tailscale-only Personal Servers.
-- [ ] The final creation plan does not show an SSH key as part of the Personal Server access model.
-- [ ] Personal Server Bootstrap input has no SSH public key field and does not depend on configured SSH identity state.
-- [ ] Existing project root, Git identity, Personal Server User, Tailscale Host, Tailnet Policy, Machine Auth Key, and cloud-init rendering behavior is preserved.
-- [ ] Tests cover missing SSH identity with successful preview, server create request without SSH key, no SSH-key output, and no regression to connection command behavior.
+- [x] Personal Server creation is not skipped when `ssh.identityFile` is empty, as long as Hetzner Credentials, Tailscale Credentials, and LocalAPI preflight are valid.
+- [x] Interactive configure no longer prompts to generate, select, add, or validate an SSH identity solely for Personal Server provisioning.
+- [x] Hetzner server creation does not create, reuse, upload, or attach a `myn-personal-server` SSH Key for new Tailscale-only Personal Servers.
+- [x] The final creation plan does not show an SSH key as part of the Personal Server access model.
+- [x] Personal Server Bootstrap input has no SSH public key field and does not depend on configured SSH identity state.
+- [x] Existing project root, Git identity, Personal Server User, Tailscale Host, Tailnet Policy, Machine Auth Key, and cloud-init rendering behavior is preserved.
+- [x] Tests cover missing SSH identity with successful preview, server create request without SSH key, no SSH-key output, and no regression to connection command behavior.
 
 ## Blocked by
 

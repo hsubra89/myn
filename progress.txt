@@ -79,3 +79,14 @@
 - Disabled cloud-init `package_update`, `package_upgrade`, and `package_reboot_if_required` so cloud-init does not run package update/upgrade work before the Tailscale-first bootstrap script.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with focused policy/bootstrap tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 11 as the next highest-priority unblocked task because it removed the remaining local SSH identity prerequisite blocking IPv6-only Hetzner provisioning.
+- Updated `myn configure` so Tailscale-only Personal Server provisioning no longer prompts to select, generate, add, or validate a local SSH identity when Hetzner Credentials, Tailscale Credentials, and LocalAPI preflight are available.
+- Removed the Personal Server creation dependency on local SSH key material: new server creation no longer loads a configured SSH identity, looks up or creates a Hetzner SSH Key, or attaches an SSH Key ID to the create request.
+- Removed SSH key output from the Personal Server creation plan and changed bootstrap polling/helper command formatting to use ordinary `ssh` when no identity is involved.
+- Added regression coverage for missing `ssh.identityFile` preview, no interactive SSH prompt during Tailscale-only configure, and server creation without Hetzner SSH key attachment.
+- Updated existing provisioning tests to assert no SSH-key lookup, creation, attachment, or command output leakage for new Tailscale-only Personal Servers.
+- Updated Issue 11 status and acceptance criteria in `issues.md`, and unblocked Issue 7.
+- Verified with `go test ./...` from `go/cli`.

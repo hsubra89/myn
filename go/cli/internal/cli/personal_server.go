@@ -230,10 +230,6 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if strings.TrimSpace(cfg.SSH.IdentityFile) == "" {
-		fmt.Fprintln(out, "Personal Server creation skipped: SSH identity is not configured.")
-		return nil
-	}
 	token := strings.TrimSpace(cfg.Auth.Hetzner.Token)
 	if token == "" {
 		fmt.Fprintln(out, "Personal Server creation skipped: Hetzner Credentials are not configured. Run `myn auth hetzner` first.")
@@ -398,7 +394,6 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			PasswordHash:      inputs.PasswordHash,
 			GitIdentity:       inputs.GitIdentity,
 			RemoteProjectRoot: cfg.Projects.RemoteRoot,
-			SSHIdentityFile:   cfg.SSH.IdentityFile,
 			TailscaleIdentity: localTailscale.Identity,
 		}
 		policyPlan, proceed, err := gate.prepareTailnetPolicyForPersonalServer(ctx, out, cfg.Auth.Tailscale, localTailscale.Identity, inputs.User, prompter)
@@ -455,11 +450,6 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return err
 	}
 
-	identity, err := gate.loadPersonalServerSSHIdentity(plan.SSHIdentityFile)
-	if err != nil {
-		return err
-	}
-
 	image, err := latestPersonalServerUbuntuImage(ctx, client)
 	if err != nil {
 		return err
@@ -488,18 +478,12 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return err
 	}
 
-	sshKey, err := ensurePersonalServerSSHKey(ctx, client, identity)
-	if err != nil {
-		return err
-	}
-
 	server, actions, err := client.CreateServer(ctx, personalServerCreateServerRequest{
 		Name:           plan.ServerName,
 		LocationName:   plan.Location.Name,
 		ServerTypeName: plan.ServerType.Name,
 		ImageID:        image.ID,
 		ImageName:      image.Name,
-		SSHKeyID:       sshKey.ID,
 		FirewallID:     firewall.ID,
 		UserData:       userData,
 		Labels:         personalServerResourceLabels(),
@@ -523,7 +507,7 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 	fmt.Fprintf(out, "Personal Server created: server %d.\n", server.ID)
 	fmt.Fprintf(out, "Personal Server addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
 
-	marker, err := gate.waitForPersonalServerBootstrap(ctx, identity, plan.User, server)
+	marker, err := gate.waitForPersonalServerBootstrap(ctx, plan.User, server)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
 		writePersonalServerSSHCommands(out, plan, server)
@@ -570,14 +554,14 @@ type personalServerBootstrapMarker struct {
 	SkippedGitIdentity []string          `json:"skippedGitIdentity"`
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, identity sshIdentityCandidate, user string, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
+func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, user string, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
 	host := personalServerBootstrapHost(server)
 	if host == "" {
 		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no reachable public address")
 	}
 
 	runner := gate.personalServerSSHRunner()
-	if err := gate.waitForPersonalServerRootSSH(ctx, runner, identity.IdentityPath, host); err != nil {
+	if err := gate.waitForPersonalServerRootSSH(ctx, runner, "", host); err != nil {
 		return personalServerBootstrapMarker{}, err
 	}
 
@@ -587,7 +571,7 @@ func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx co
 
 	for {
 		for _, loginUser := range personalServerBootstrapMarkerUsers(user) {
-			output, err := runner(pollCtx, identity.IdentityPath, loginUser, host, "cat "+personalServerBootstrapMarkerPath)
+			output, err := runner(pollCtx, "", loginUser, host, "cat "+personalServerBootstrapMarkerPath)
 			if err == nil {
 				marker, parseErr := parsePersonalServerBootstrapMarker(output)
 				if parseErr == nil {
@@ -732,6 +716,10 @@ func writePersonalServerSSHCommand(out io.Writer, label string, identityFile str
 		fmt.Fprintf(out, "- %s: unavailable\n", label)
 		return
 	}
+	if strings.TrimSpace(identityFile) == "" {
+		fmt.Fprintf(out, "- %s: %s\n", label, personalServerTailscaleSSHCommandText(user, host))
+		return
+	}
 	fmt.Fprintf(out, "- %s: %s\n", label, personalServerSSHCommandText("~/"+identityFile, user, host))
 }
 
@@ -745,6 +733,10 @@ func writePersonalServerMoshCommand(out io.Writer, label string, identityFile st
 	host = strings.TrimSpace(host)
 	if host == "" {
 		fmt.Fprintf(out, "- %s: unavailable\n", label)
+		return
+	}
+	if strings.TrimSpace(identityFile) == "" {
+		fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh\" %s@%s\n", label, user, host)
 		return
 	}
 	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/%s\" %s@%s\n", label, identityFile, user, host)
@@ -762,11 +754,17 @@ func (gate personalServerProvisioningGate) personalServerSSHRunner() personalSer
 }
 
 func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-	args := personalServerSSHCommandArgs(identityFile, user, host,
+	options := []string{
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
-	)
+	}
+	var args []string
+	if strings.TrimSpace(identityFile) == "" {
+		args = personalServerTailscaleSSHCommandArgs(user, host, options...)
+	} else {
+		args = personalServerSSHCommandArgs(identityFile, user, host, options...)
+	}
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	output, err := cmd.CombinedOutput()
@@ -1282,7 +1280,6 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintf(out, "Server name: %s\n", plan.ServerName)
 	fmt.Fprintf(out, "Personal Server User: %s\n", plan.User)
 	fmt.Fprintln(out, "SSH and network:")
-	fmt.Fprintf(out, "SSH key: ~/%s\n", plan.SSHIdentityFile)
 	if plan.ExistingFirewall {
 		fmt.Fprintf(out, "Firewall: %s (existing rules reused unchanged; Mosh may require inbound UDP %s)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
 	} else {
