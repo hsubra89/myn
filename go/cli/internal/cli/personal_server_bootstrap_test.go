@@ -9,13 +9,14 @@ import (
 )
 
 func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
-	const sshPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey personal@local"
+	const machineAuthKey = "tskey-auth-secret"
 
 	rendered, err := renderPersonalServerBootstrapCloudInit(personalServerBootstrapInput{
-		User:              "harish",
-		PasswordHash:      "$6$abcdefghijklmnop$hashed",
-		SSHPublicKey:      sshPublicKey,
-		RemoteProjectRoot: "Remote Projects",
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: machineAuthKey,
+		RemoteProjectRoot:       "Remote Projects",
 		GitIdentity: personalServerGitIdentity{
 			Name: "Harish Subramanian",
 		},
@@ -32,19 +33,19 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	}
 
 	parsed := parseBootstrapCloudInit(t, rendered)
-	if !parsed.PackageUpdate || !parsed.PackageUpgrade || !parsed.PackageRebootIfRequired {
-		t.Fatalf("security updates and reboot-on-required should be enabled, got %#v", parsed)
+	if parsed.PackageUpdate || parsed.PackageUpgrade || parsed.PackageRebootIfRequired {
+		t.Fatalf("cloud-init package updates should be disabled before Tailscale joins, got %#v", parsed)
 	}
 	if parsed.DisableRoot {
-		t.Fatal("root SSH should remain enabled")
+		t.Fatal("root account should remain available to cloud-init")
 	}
 	if parsed.SSHPwAuth {
 		t.Fatal("password SSH authentication should remain disabled")
 	}
 
 	root := parsed.user("root")
-	if !containsString(root.SSHAuthorizedKeys, sshPublicKey) {
-		t.Fatalf("root should authorize configured SSH key, got %#v", root.SSHAuthorizedKeys)
+	if len(root.SSHAuthorizedKeys) != 0 {
+		t.Fatalf("root should not receive authorized SSH keys, got %#v", root.SSHAuthorizedKeys)
 	}
 
 	user := parsed.user("harish")
@@ -65,25 +66,65 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	if got, want := user.Passwd, "$6$abcdefghijklmnop$hashed"; got != want {
 		t.Fatalf("password hash mismatch: want %q, got %q", want, got)
 	}
-	if !containsString(user.SSHAuthorizedKeys, sshPublicKey) {
-		t.Fatalf("user should authorize configured SSH key, got %#v", user.SSHAuthorizedKeys)
+	if len(user.SSHAuthorizedKeys) != 0 {
+		t.Fatalf("user should not receive authorized SSH keys, got %#v", user.SSHAuthorizedKeys)
+	}
+
+	if got, want := len(parsed.BootCmd), 1; got != want {
+		t.Fatalf("cloud-init should create the Machine Auth Key through one bootcmd: want %d, got %d", want, got)
+	}
+	authKeyBootCmd := parsed.BootCmd[0]
+	for _, want := range []string{
+		"cat >'/run/myn/tailscale-auth-key' <<'MYN_TAILSCALE_AUTH_KEY'",
+		machineAuthKey,
+		"/var/lib/cloud/instances",
+		"/var/lib/cloud/instance",
+		"[redacted tailscale auth key]",
+	} {
+		if !strings.Contains(authKeyBootCmd, want) {
+			t.Fatalf("Machine Auth Key bootcmd should contain %q:\n%s", want, authKeyBootCmd)
+		}
+	}
+	if _, ok := parsed.findWriteFile("/run/myn/tailscale-auth-key"); ok {
+		t.Fatalf("Machine Auth Key should not be written through cloud-init write_files: %#v", parsed.WriteFiles)
 	}
 
 	script := parsed.bootstrapScript()
+	if scriptFile := parsed.writeFile("/usr/local/sbin/myn-personal-server-bootstrap.sh"); scriptFile.Permissions != "0755" {
+		t.Fatalf("bootstrap script permissions mismatch: want 0755, got %#v", scriptFile)
+	}
 	for _, want := range []string{
 		"MYN_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'",
 		"export MYN_USER='harish'",
-		"MYN_SSH_HARDENING_PROFILE='/etc/ssh/sshd_config.d/20-myn-hardening.conf'",
+		"MYN_TAILSCALE_HOST='harish-personal-server'",
+		"MYN_TAILSCALE_AUTH_KEY_FILE='/run/myn/tailscale-auth-key'",
+		"curl -fsSL \"https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg\" -o /usr/share/keyrings/tailscale-archive-keyring.gpg",
+		"curl -fsSL \"https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list\" -o /etc/apt/sources.list.d/tailscale.list",
+		"apt-get install -y tailscale",
+		"if [ ! -s \"$MYN_TAILSCALE_AUTH_KEY_FILE\" ]; then",
+		"fail_tailscale_join \"missing auth key file\"",
+		"chmod 0600 \"$MYN_TAILSCALE_AUTH_KEY_FILE\"",
+		"tailscale up --auth-key=\"file:$MYN_TAILSCALE_AUTH_KEY_FILE\" --hostname=\"$MYN_TAILSCALE_HOST\" --ssh",
+		"rm -f \"$MYN_TAILSCALE_AUTH_KEY_FILE\"",
+		"disable_system_openssh",
 		"install -d -o \"$MYN_USER\" -g \"$MYN_USER\" \"$MYN_REMOTE_PROJECT_ROOT\"",
 		"install -m 0644 -o \"$MYN_USER\" -g \"$MYN_USER\" /dev/null \"/home/$MYN_USER/.tmux.conf\"",
 		"cat >\"/home/$MYN_USER/.tmux.conf\" <<'TMUXCONF'\n" + personalServerTmuxProfile + "TMUXCONF\n",
 		"chown \"$MYN_USER:$MYN_USER\" \"/home/$MYN_USER/.tmux.conf\"",
 		"chmod 0644 \"/home/$MYN_USER/.tmux.conf\"",
-		"apt-get install -y ca-certificates curl gnupg lsb-release unattended-upgrades apt-transport-https build-essential procps file git sudo mosh",
+		"apt-get install -y unattended-upgrades build-essential procps file git sudo",
 		"systemctl enable --now unattended-upgrades",
 		"APT::Periodic::Unattended-Upgrade \"1\";",
 		"https://download.docker.com/linux/ubuntu",
 		"docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		"github_infrastructure_reachable",
+		"https://codeload.github.com",
+		"https://ghcr.io/v2/",
+		"record_partial_failure \"Homebrew tools skipped: IPv4 egress to GitHub/Homebrew infrastructure is unavailable\"",
+		"record_partial_failure \"Homebrew install failed\"",
+		"record_partial_failure \"Homebrew update failed\"",
+		"record_partial_failure \"Homebrew tool install failed\"",
+		"install_homebrew_development_tools",
 		"brew install \"${MYN_HOMEBREW_TOOLS[@]}\"",
 		"nvm install --lts",
 		"nvm alias default 'lts/*'",
@@ -94,19 +135,17 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"trap mark_failed ERR",
 		"write_marker \"failed\"",
 		"os.chmod(path, 0o644)",
-		"Personal Server SSH Hardening Profile failed to apply",
-		"PermitRootLogin no",
-		"AllowUsers harish",
-		"RequiredRSASize 3072",
-		"AuthenticationMethods publickey",
-		"PasswordAuthentication no",
-		"KbdInteractiveAuthentication no",
-		"AllowAgentForwarding no",
-		"AllowTcpForwarding local",
-		"PermitTunnel no",
-		"ClientAliveInterval 300",
-		"sshd -t",
-		"systemctl reload ssh",
+		"Personal Server Tailscale join failed",
+		"Personal Server system OpenSSH disablement failed",
+		"disable_systemd_unit_now ssh.socket",
+		"disable_systemd_unit_now sshd.socket",
+		"disable_systemd_unit_now ssh.service",
+		"disable_systemd_unit_now sshd.service",
+		"disable_systemd_unit_now ssh",
+		"systemctl disable --now \"$unit\"",
+		"systemctl is-active --quiet ssh.socket",
+		"systemctl is-active --quiet ssh.service",
+		"OpenSSH socket is still active",
 		"MYN_PARTIAL_FAILURES+=(\"Codex install failed\")",
 		"MYN_PARTIAL_FAILURES+=(\"Claude Code install failed\")",
 		"\"status\"",
@@ -115,7 +154,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"\"toolVersions\"",
 		"myn_user = os.environ.get(\"MYN_USER\", \"\")",
 		"\"sudo\", \"-H\", \"-u\", myn_user",
-		"\"mosh\": [\"mosh-server\", \"--version\"]",
+		"\"tailscale\": [\"tailscale\", \"version\"]",
 		"\"brew\": user_command([\"/home/linuxbrew/.linuxbrew/bin/brew\", \"--version\"])",
 		"\"node\": user_shell(\"source /etc/profile.d/myn-personal-server.sh >/dev/null 2>&1; node --version\")",
 		"\"partialFailures\"",
@@ -130,8 +169,15 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"rustup toolchain install",
 		"git clone",
 		"gh auth login",
+		"ssh_authorized_keys",
 		"brew install mosh",
+		"mosh-server",
+		"MYN_SSH_HARDENING_PROFILE",
+		"sshd -t",
+		"AuthenticationMethods publickey",
 		"$6$abcdefghijklmnop$hashed",
+		machineAuthKey,
+		"--auth-key=" + machineAuthKey,
 		"AllowUsers root",
 	} {
 		if strings.Contains(script, forbidden) {
@@ -140,13 +186,66 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	}
 }
 
+func TestRenderPersonalServerBootstrapScriptDisablesOpenSSHUnits(t *testing.T) {
+	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: "tskey-auth-secret",
+		RemoteProjectRoot:       "projects",
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
+
+	want := `disable_system_openssh() {
+  disable_systemd_unit_now ssh.socket
+  disable_systemd_unit_now sshd.socket
+  disable_systemd_unit_now ssh.service
+  disable_systemd_unit_now sshd.service
+  disable_systemd_unit_now ssh
+  disable_systemd_unit_now sshd
+  if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
+    fail_openssh_disable "OpenSSH socket is still active"
+  fi
+  if systemctl is-active --quiet ssh.service 2>/dev/null || systemctl is-active --quiet sshd.service 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
+    fail_openssh_disable "OpenSSH service is still active"
+  fi
+}`
+	if !strings.Contains(script, want) {
+		t.Fatalf("bootstrap script should disable and verify OpenSSH units:\n%s", script)
+	}
+}
+
+func TestRenderPersonalServerBootstrapScriptCleansAuthKeyOnGenericFailure(t *testing.T) {
+	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: "tskey-auth-secret",
+		RemoteProjectRoot:       "projects",
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
+
+	want := `mark_failed() {
+  local status="$?"
+  local command="${BASH_COMMAND:-unknown command}"
+  trap - ERR
+  cleanup_tailscale_auth_key
+  write_marker "failed" "$command (exit $status)"
+  exit "$status"
+}`
+	if !strings.Contains(script, want) {
+		t.Fatalf("bootstrap script should remove the Machine Auth Key before writing generic failure markers:\n%s", script)
+	}
+}
+
 func TestRenderPersonalServerBootstrapScriptIsValidBash(t *testing.T) {
 	script := renderPersonalServerBootstrapScript(personalServerBootstrapInput{
-		User:              "harish",
-		PasswordHash:      "$6$abcdefghijklmnop$hashed",
-		SSHPublicKey:      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey personal@local",
-		RemoteProjectRoot: "projects",
-		ToolPlan:          defaultPersonalServerBootstrapToolPlan(),
+		User:                    "harish",
+		PasswordHash:            "$6$abcdefghijklmnop$hashed",
+		TailscaleHost:           "harish-personal-server",
+		TailscaleMachineAuthKey: "tskey-auth-secret",
+		RemoteProjectRoot:       "projects",
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
 	})
 
 	cmd := exec.Command("bash", "-n")
@@ -157,41 +256,6 @@ func TestRenderPersonalServerBootstrapScriptIsValidBash(t *testing.T) {
 	}
 }
 
-func TestRenderPersonalServerSSHHardeningProfile(t *testing.T) {
-	profile := renderPersonalServerSSHHardeningProfile("harish")
-	for _, want := range []string{
-		"PermitRootLogin no",
-		"AllowUsers harish",
-		"PubkeyAuthentication yes",
-		"RequiredRSASize 3072",
-		"AuthenticationMethods publickey",
-		"PasswordAuthentication no",
-		"KbdInteractiveAuthentication no",
-		"PermitEmptyPasswords no",
-		"StrictModes yes",
-		"HostbasedAuthentication no",
-		"IgnoreRhosts yes",
-		"LoginGraceTime 30",
-		"MaxAuthTries 3",
-		"MaxStartups 10:30:60",
-		"PerSourceMaxStartups 5",
-		"X11Forwarding no",
-		"AllowAgentForwarding no",
-		"AllowTcpForwarding local",
-		"GatewayPorts no",
-		"PermitTunnel no",
-		"PermitUserEnvironment no",
-		"LogLevel VERBOSE",
-		"DebianBanner no",
-		"ClientAliveInterval 300",
-		"ClientAliveCountMax 2",
-	} {
-		if !strings.Contains(profile, want) {
-			t.Fatalf("hardening profile should contain %q:\n%s", want, profile)
-		}
-	}
-}
-
 type parsedBootstrapCloudInit struct {
 	PackageUpdate           bool                 `yaml:"package_update"`
 	PackageUpgrade          bool                 `yaml:"package_upgrade"`
@@ -199,6 +263,7 @@ type parsedBootstrapCloudInit struct {
 	DisableRoot             bool                 `yaml:"disable_root"`
 	SSHPwAuth               bool                 `yaml:"ssh_pwauth"`
 	Users                   []bootstrapCloudUser `yaml:"users"`
+	BootCmd                 []string             `yaml:"bootcmd"`
 	WriteFiles              []bootstrapWriteFile `yaml:"write_files"`
 }
 
@@ -213,8 +278,10 @@ type bootstrapCloudUser struct {
 }
 
 type bootstrapWriteFile struct {
-	Path    string `yaml:"path"`
-	Content string `yaml:"content"`
+	Path        string `yaml:"path"`
+	Owner       string `yaml:"owner"`
+	Permissions string `yaml:"permissions"`
+	Content     string `yaml:"content"`
 }
 
 func parseBootstrapCloudInit(t *testing.T, rendered string) parsedBootstrapCloudInit {
@@ -237,12 +304,21 @@ func (parsed parsedBootstrapCloudInit) user(name string) bootstrapCloudUser {
 }
 
 func (parsed parsedBootstrapCloudInit) bootstrapScript() string {
+	return parsed.writeFile("/usr/local/sbin/myn-personal-server-bootstrap.sh").Content
+}
+
+func (parsed parsedBootstrapCloudInit) writeFile(path string) bootstrapWriteFile {
+	writeFile, _ := parsed.findWriteFile(path)
+	return writeFile
+}
+
+func (parsed parsedBootstrapCloudInit) findWriteFile(path string) (bootstrapWriteFile, bool) {
 	for _, file := range parsed.WriteFiles {
-		if file.Path == "/usr/local/sbin/myn-personal-server-bootstrap.sh" {
-			return file.Content
+		if file.Path == path {
+			return file, true
 		}
 	}
-	return ""
+	return bootstrapWriteFile{}, false
 }
 
 func containsString(values []string, want string) bool {

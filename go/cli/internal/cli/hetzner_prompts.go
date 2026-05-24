@@ -15,6 +15,13 @@ type hetznerAuthPrompter interface {
 	InputToken() (string, error)
 }
 
+type tailscaleAuthPrompter interface {
+	CanPrompt() bool
+	InputTailscaleToken() (string, error)
+	InputTailnet() (string, error)
+	SelectTailnet(candidates []string) (string, error)
+}
+
 type huhPrompter struct{}
 
 func (huhPrompter) CanPrompt() bool {
@@ -75,6 +82,49 @@ func (huhPrompter) InputToken() (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+func (huhPrompter) InputTailscaleToken() (string, error) {
+	var token string
+	if err := huh.NewInput().
+		Title("Tailscale API access token").
+		Password(true).
+		Value(&token).
+		Run(); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (huhPrompter) InputTailnet() (string, error) {
+	var tailnet string
+	if err := huh.NewInput().
+		Title("Tailscale tailnet ID").
+		Value(&tailnet).
+		Run(); err != nil {
+		return "", err
+	}
+	return tailnet, nil
+}
+
+func (huhPrompter) SelectTailnet(candidates []string) (string, error) {
+	options := make([]huh.Option[string], 0, len(candidates))
+	selected := ""
+	for index, candidate := range candidates {
+		if index == 0 {
+			selected = candidate
+		}
+		options = append(options, huh.NewOption(candidate, candidate))
+	}
+
+	if err := huh.NewSelect[string]().
+		Title("Select Tailscale tailnet").
+		Options(options...).
+		Value(&selected).
+		Run(); err != nil {
+		return "", err
+	}
+	return selected, nil
 }
 
 func (huhPrompter) Input(title string, defaultValue string, validate func(string) error) (string, error) {

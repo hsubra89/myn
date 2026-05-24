@@ -1,0 +1,267 @@
+2026-05-24
+
+- Selected Issue 2 as the next highest-priority unblocked task because it removes the public SSH fallback from the existing Personal Server entry points without waiting for provisioning work.
+- Implemented Tailscale-only Personal Server Connections: `myn connect`, `myn connect-new`, and `myn sessions` now require `personalServer.user` plus `personalServer.tailscaleHost`, use ordinary `ssh` to that Tailscale Host, keep `StrictHostKeyChecking=accept-new`, and do not pass `-i` or `IdentitiesOnly=yes`.
+- Added legacy public-SSH Personal Server Configuration handling for connection commands: saved public IPv4/IPv6 without a Tailscale Host now fails with an explicit migration message instead of falling back to public addresses.
+- Preserved existing Project Session and tmux handoff behavior, including session numbering, terminal validation, quiet successful handoff, and SSH exit status preservation.
+- Updated Issue 2 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 1 as the next highest-priority task because Tailscale Credentials are the unblocked prerequisite for configure-time LocalAPI checks, Tailnet Policy planning, auth-key creation, and the rest of the provisioning sequence.
+- Implemented `myn auth tailscale` under the existing `auth` namespace with `--token`, `--tailnet`, `TAILSCALE_API_TOKEN`, and `TAILSCALE_TAILNET` support.
+- Added interactive Tailscale auth flow that opens the Tailscale Keys page, prints the URL when browser opening fails, prompts for the API access token, infers a single tailnet when possible, and prompts when inference is ambiguous.
+- Added saved Tailscale Credentials as `auth.tailscale.token` and `auth.tailscale.tailnet` only; validation keys are not saved or printed.
+- Added Tailscale cloud validation through the official Tailscale API client for policy read, policy validation, safe no-op policy update with ETag, device listing, and auth-key creation capability.
+- Added tests for successful save, env-driven auth, API validation request shape, invalid token failure, insufficient capability failure, tailnet inference, ambiguous tailnet prompting, browser fallback, output secret non-leakage, and config file permissions.
+- Updated Issue 1 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 3 as the next highest-priority task because configure-time LocalAPI preflight is the first unfinished prerequisite for Tailnet Policy planning and the rest of Tailscale-only provisioning.
+- Added a Tailscale LocalAPI boundary for Personal Server creation preflight using the official `tailscale.com/client/local` client and `StatusWithoutPeers`.
+- Updated `myn configure` Personal Server creation to require saved Tailscale Credentials, verify the local daemon is running, connected, readable, and on the saved tailnet before Hetzner preview or creation work.
+- Changed the Personal Server User default to derive from the current LocalAPI Tailscale identity while preserving editable, validated prompts.
+- Added tests for missing Tailscale Credentials, LocalAPI unavailable, disconnected daemon, tailnet mismatch, LocalAPI status mapping, and identity-derived editable defaults.
+- Updated Issue 3 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Fixed configure-time LocalAPI tailnet verification to use the local node ID against the saved tailnet's Tailscale cloud device list when LocalAPI exposes the node ID, avoiding false mismatches between API tailnet identifiers and local display or MagicDNS names.
+- Kept a local name/suffix fallback for LocalAPI statuses that do not expose a self node ID.
+- Fixed interactive `myn auth tailscale` browser opening to wait for the opener exit status, so a started-but-failing `xdg-open`/`open` still prints the Tailscale Keys URL fallback.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused Tailscale regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 4 as the next highest-priority unblocked task because Tailnet Policy planning is the remaining prerequisite for one-off Machine Auth Key creation and later Tailscale-only provisioning orchestration.
+- Added a testable Tailnet Policy planner for `tag:myn-personal-server` that detects existing tag ownership, network grants on `tcp:22`, and narrow Tailscale SSH rules for the selected Personal Server User with `checkPeriod: "always"`.
+- Updated `myn configure` to read Tailnet Policy after the Personal Server User is selected, summarize missing policy pieces, open the Tailscale Access Controls page when edits are needed, ask before API editing, and validate the current or proposed policy before the final server creation confirmation.
+- Added post-confirmation Tailnet Policy re-read, re-validation, and ETag-protected apply before any Hetzner resources are created.
+- Preserved unrelated policy content with HuJSON patch edits, kept existing comments where practical, added Myn comments to inserted policy sections, used grants for network access, and did not add policy tests or migrate legacy ACLs.
+- Added tests for no-op policy, missing tag owner, missing grant, missing SSH rule, combined changes, validation failure, apply conflict, and declined policy edits.
+- Updated Issue 4 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 5 as the next highest-priority unblocked task because one-off Tailscale Machine Auth Key creation is the prerequisite for Tailscale-first bootstrap rendering and later configure orchestration.
+- Added a Tailscale Machine Auth Key client boundary backed by the official Tailscale API client.
+- Updated `myn configure` Personal Server creation to create a fresh one-off, tagged `tag:myn-personal-server`, pre-approved, non-ephemeral auth key with a ten-minute expiry after final confirmation and Tailnet Policy apply.
+- Passed the Machine Auth Key into the Personal Server Bootstrap renderer input while keeping it out of saved config and command output.
+- Kept auth-key failures before Hetzner resource creation, and did not add any revoke path after successful join.
+- Added tests for the Tailscale auth-key request shape, policy/key/cloud ordering, bootstrap renderer handoff, no config/stdout leakage, and create-key failure before cloud resources.
+- Updated Issue 5 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 6 as the next highest-priority unblocked task because Tailscale-first Bootstrap is the prerequisite for IPv6-only Hetzner provisioning and the remaining configure orchestration.
+- Updated Personal Server Bootstrap rendering so cloud-init no longer writes `ssh_authorized_keys`, installs and starts Tailscale before development tooling, writes the one-off Machine Auth Key through a root-only file, runs `tailscale up --auth-key=file:... --hostname ... --ssh`, removes the key after join, and hard-fails marker status on Tailscale join errors.
+- Replaced the legacy OpenSSH hardening profile step with system OpenSSH disablement after Tailscale SSH is enabled, with hard-fail marker behavior if disablement fails.
+- Removed Mosh from bootstrap packages, marker tool versions, and the Personal Server install plan while preserving Docker, Homebrew, tmux, Git, GitHub CLI, rustup, Go, nvm, Node, Codex, Claude Code, Git identity, and tmux profile behavior.
+- Passed the selected Tailscale Host into bootstrap rendering and kept the Machine Auth Key out of stdout and saved config.
+- Added Issue 11 for the remaining PRD gap where configure/provisioning still depends on a local SSH identity and Hetzner SSH Key outside the bootstrap renderer.
+- Updated Issue 6 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Changed generated and sufficient Tailscale SSH policy rules from `action: "accept"` to `action: "check"` so `checkPeriod: "always"` is enforced, and added regression coverage for rejecting `accept` SSH rules.
+- Changed post-confirmation Tailnet Policy handling to always re-read and re-validate no-op policy previews, and to fail before Machine Auth Key or cloud resource creation if a no-op preview would require a new unapproved policy edit.
+- Moved the one-off Tailscale Machine Auth Key out of the persistent `0755` bootstrap script and into a root-owned `0600` `/run/myn/tailscale-auth-key` file rendered by cloud-init, with the script only consuming and removing that file.
+- Disabled cloud-init `package_update`, `package_upgrade`, and `package_reboot_if_required` so cloud-init does not run package update/upgrade work before the Tailscale-first bootstrap script.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused policy/bootstrap tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 11 as the next highest-priority unblocked task because it removed the remaining local SSH identity prerequisite blocking IPv6-only Hetzner provisioning.
+- Updated `myn configure` so Tailscale-only Personal Server provisioning no longer prompts to select, generate, add, or validate a local SSH identity when Hetzner Credentials, Tailscale Credentials, and LocalAPI preflight are available.
+- Removed the Personal Server creation dependency on local SSH key material: new server creation no longer loads a configured SSH identity, looks up or creates a Hetzner SSH Key, or attaches an SSH Key ID to the create request.
+- Removed SSH key output from the Personal Server creation plan and changed bootstrap polling/helper command formatting to use ordinary `ssh` when no identity is involved.
+- Added regression coverage for missing `ssh.identityFile` preview, no interactive SSH prompt during Tailscale-only configure, and server creation without Hetzner SSH key attachment.
+- Updated existing provisioning tests to assert no SSH-key lookup, creation, attachment, or command output leakage for new Tailscale-only Personal Servers.
+- Updated Issue 11 status and acceptance criteria in `issues.md`, and unblocked Issue 7.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 7 as the next highest-priority unblocked task because IPv6-only Hetzner provisioning and no-public-ingress firewalls unblock the remaining Tailscale-only configure orchestration.
+- Used a TDD loop around Personal Server provisioning tests to lock in IPv4-disabled/IPv6-enabled server creation, no public inbound firewall rules, Tailscale Host server labels, and the new saved config shape.
+- Updated Personal Server creation to save `serverID`, Personal Server User, `tailscaleHost`, and public IPv6 inventory only; public IPv4 is no longer saved or printed as an access path.
+- Changed the reusable `myn-personal-server` firewall to be created with no rules, reconciled to no rules when it is Myn-managed, and rejected when an existing firewall with that name is not Myn-managed.
+- Updated final plan and bootstrap completion/failure output to describe IPv6-only public networking, no public inbound firewall rules, the Tailscale Host, public IPv6 inventory, and `myn connect` without public SSH or Mosh commands.
+- Updated Issue 7 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 8 as the next highest-priority unblocked task because Issues 4-7 and 11 had completed the prerequisites for full Tailscale-only configure completion.
+- Added a Tailscale device-listing boundary and duplicate Tailscale Host check before Tailnet Policy mutation, Machine Auth Key creation, or cloud resource creation.
+- Reworked Personal Server completion to save the billable server identity after Hetzner create actions, then print separate progress while waiting for Tailscale device registration, Tailscale SSH reachability, and bootstrap marker polling.
+- Changed reachability and bootstrap verification to use ordinary `ssh` to the Tailscale Host as the Personal Server User, with the bootstrap marker read over that real access path.
+- Added hard-fail handling that preserves saved Personal Server Configuration for device timeout, unauthorized device, offline device, SSH timeout, bootstrap timeout, and bootstrap failure.
+- Added tests for the Tailscale-only happy path, duplicate Tailscale Host conflict, device timeout, unauthorized/offline devices, SSH timeout, and updated bootstrap polling expectations.
+- Updated Issue 8 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Addressed the highest-priority review notes only.
+- Updated the generated Personal Server Bootstrap script to disable and verify `ssh.socket` and `sshd.socket` as well as the `ssh` and `sshd` services, so socket-activated OpenSSH cannot keep public SSH listening after the hardening step reports success.
+- Updated the generic bootstrap failure trap to remove `/run/myn/tailscale-auth-key` before writing a failed marker, covering failures before `tailscale up` consumes the one-off Machine Auth Key.
+- Added focused bootstrap renderer regression tests for OpenSSH socket disablement and generic-failure auth-key cleanup.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrap'` and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 9 as the next highest-priority remaining agent task because existing Tailscale Personal Server verification was the last AFK blocker before documentation and live validation.
+- Changed `myn configure` existing-server handling to classify saved Personal Server Configuration through the Tailscale-only connection state, require a saved server ID for reuse, verify the Hetzner server ID, and verify the saved Tailscale Host exists in the saved tailnet before skipping creation.
+- Updated skip output to report the saved server ID, Tailscale Host, saved public IPv6 inventory, and current Hetzner state without presenting public addresses as connection paths.
+- Made missing saved Tailscale devices fail with a manual repair or recreate message while preserving saved Personal Server Configuration.
+- Made legacy public-SSH Personal Server Configuration fail with the migration message without prompting to clear or recreate it automatically.
+- Added regression coverage for verified existing Tailscale servers, missing Tailscale devices, legacy public-SSH migration, incomplete Tailscale config, stale missing Hetzner server behavior, non-interactive behavior, and the Hetzner endpoint override.
+- Updated Issue 9 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 10 as the next highest-priority remaining task because the implementation work was complete through Issue 9, and the user-facing docs still described the old public SSH and Mosh provisioning model.
+- Updated `go/cli/README.md` to document the required `myn auth hetzner`, `myn auth tailscale`, `myn configure` order, Tailscale Credentials, one-off Machine Auth Keys, configure-time LocalAPI preflight, Tailnet Policy changes, IPv6-only/no-public-ingress provisioning, Tailscale SSH connection behavior, and the legacy public-SSH migration break.
+- Replaced the stale live Hetzner validation section with human-run Tailscale-only live validation prerequisites and smoke-test checks, including required Hetzner and Tailscale secrets.
+- Updated Issue 10 status and checked off the completed documentation and live-validation-instruction acceptance criteria while leaving the real billable live smoke test pending for a human.
+- Verified with `git diff --check` and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
+
+2026-05-24
+
+- Selected the remaining agent-owned part of Issue 10 as the next highest-priority task because the checked-in live validation harness still exercised the old public-SSH provisioning model while the actual billable smoke test remains human-run.
+- Updated the gated live validation harness to require Hetzner and Tailscale credentials from `.env.local`, save both credentials through the auth flows, run configure without local SSH identity setup, allow Tailnet Policy editing, and use real LocalAPI/Tailscale cloud clients for the Tailscale-only provisioning path.
+- Changed live validation SSH checks to use ordinary Tailscale SSH as the Personal Server User with no identity file, and added assertions for saved Tailscale Host, no saved IPv4, IPv4-disabled Hetzner server, Tailscale Host labels, ready tagged Tailscale device, no public inbound firewall rules, successful bootstrap marker, disabled system OpenSSH, and no Mosh install.
+- Documented the gated `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v` command in `go/cli/README.md`.
+- Updated Issue 10 status and added the completed gated harness acceptance criterion while leaving the real billable live validation criteria pending for a human.
+- Verified with focused live-validation tests, `git diff --check`, and `go test ./...` from `go/cli`; did not run the live smoke test because it provisions a billable server and needs real Hetzner/Tailscale credentials.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Updated the generated Personal Server Bootstrap script to disable and verify `ssh.service` and `sshd.service` in addition to the socket units and legacy bare unit names, so Ubuntu's real OpenSSH units cannot remain active unnoticed.
+- Changed Tailscale SSH reachability waiting to use an interactive Tailscale SSH check path for the first reachable command and to print distinct SSH failure output, including required Tailscale check URLs, while polling.
+- Changed configure's SSH identity setup gate so missing Tailscale Credentials no longer trigger legacy SSH identity setup when Hetzner Credentials are present; the Personal Server path now reaches the `myn auth tailscale` guidance first.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with `go test ./internal/cli -run 'TestRenderPersonalServerBootstrapScriptDisablesOpenSSHUnits|TestRunConfigureMissingTailscaleCredentialsSkipsSSHIdentitySetup|TestRunConfigureReportsTailscaleSSHTimeoutButKeepsSavedServer'` and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Attempted the remaining Issue 10 live validation first because it was the only open task, but the gated run skipped immediately because `.env.local` is missing `TAILSCALE_API_TOKEN`; left Issue 10 pending for a human run with complete credentials.
+- Added Issue 12 as the highest-priority agent-owned gap because explicitly enabled live validation should fail clearly when prerequisites are missing rather than reporting a skipped passing test.
+- Updated `TestLivePersonalServerProvisioning` so `MYN_LIVE_TAILSCALE=1` treats missing `.env.local` or missing Hetzner/Tailscale variables as hard prerequisite failures with the specific missing variable name.
+- Added focused coverage for the repository-root live-validation credential loader without using real credentials or creating cloud resources.
+- Updated Issue 12 status and acceptance criteria in `issues.md`.
+- Verified with the focused live-validation prerequisite tests, confirmed the ungated live test still skips, confirmed the enabled gate now fails clearly with the missing `TAILSCALE_API_TOKEN` message in this checkout, and ran `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 13 as the next highest-priority agent-owned task because Issue 10 is waiting on human live validation, and the code still carried dead public-SSH/Mosh provisioning surfaces from the old access model.
+- Removed dead Personal Server helpers that formatted public IPv4/IPv6 SSH and Mosh commands, selected public bootstrap hosts, and waited for root public SSH during bootstrap.
+- Removed the unused Personal Server Hetzner SSH Key lookup/create/attachment surface from the cloud boundary, hcloud adapter, create request, fakes, and tests.
+- Removed the old public-address connection classifier and public-host selection tests, leaving the Tailscale connection classifier as the active Personal Server connection path.
+- Updated Issue 13 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`, `git diff --check`, and a source scan confirming the removed public-SSH/Mosh helpers and SSH-key provisioning surface are absent from production CLI code.
+
+2026-05-24
+
+- Selected Issue 14 as the next highest-priority agent-owned task because Issue 10 is still human/billable, and the Personal Server SSH runner still carried an identity-file command branch from the old public-SSH model.
+- Added Issue 14 to track removing the remaining identity-file branch from Personal Server SSH command construction.
+- Used a focused TDD slice to change Personal Server SSH command args so they accept only the Personal Server User, Tailscale Host, and SSH options, with no `-i` or `IdentitiesOnly=yes` path.
+- Narrowed the Personal Server SSH runner signature, bootstrap marker polling, Tailscale SSH reachability test adapter, live validation SSH checks, and connect/session command construction to the same identity-free ordinary `ssh` helper.
+- Removed the dead Personal Server SSH identity loader and its unused provisioning-gate key/file hooks.
+- Updated Issue 14 status and acceptance criteria in `issues.md`.
+- Verified with the focused Personal Server SSH/configure tests, `go test ./internal/cli -count=1`, `go test ./...` from `go/cli`, `git diff --check`, and a source scan for removed Personal Server identity SSH command surfaces.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Changed the default and live-validation Personal Server SSH marker runners to capture stdout separately from stderr, so successful marker JSON is not polluted by Tailscale SSH banners, check prompts, or other stderr output.
+- Kept SSH failure diagnostics by including both captured stdout and stderr in command errors.
+- Changed Tailnet Policy planning to reject existing broad Tailscale SSH rules that overlap `tag:myn-personal-server` before provisioning, including wildcard destinations, wildcard users, extra users, and extra sources.
+- Added focused regression coverage for stdout-only marker SSH output, live-validation SSH output capture, stderr diagnostics on SSH failure, and broad overlapping Tailscale SSH policy rejection.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 10 as the only remaining task because all AFK implementation issues are done and the unchecked acceptance criteria are the human-run billable live validation checks.
+- Ran the normal feedback loop with `go test ./...` from `go/cli`; it passed.
+- Ran the enabled live validation gate with `MYN_LIVE_TAILSCALE=1 go test ./internal/cli -run TestLivePersonalServerProvisioning -count=1 -v`; it failed before provisioning because `.env.local` is missing `TAILSCALE_API_TOKEN`.
+- Updated Issue 10 status to record the current human prerequisite block; no billable Hetzner server was created and no product code changed.
+
+2026-05-24
+
+- Selected Issue 15 as the next highest-priority agent-owned task after finding that configure still did Tailnet Policy work before reporting duplicate Personal Server names, while Issue 10 remains blocked on human live-validation credentials.
+- Added Issue 15 to track the PRD sequencing gap around duplicate Hetzner server name and Tailscale Host checks before Tailnet Policy work.
+- Used a focused TDD slice: first reproduced that duplicate Hetzner names still read and validated Tailnet Policy, then moved duplicate-name preflight before Tailnet Policy planning while keeping the final pre-create race checks.
+- Added coverage that duplicate Hetzner server names and duplicate Tailscale Hosts fail before Tailnet Policy reads, validation, browser opening, policy-edit prompts, Machine Auth Key creation, or cloud resource creation.
+- Updated Issue 15 status and acceptance criteria in `issues.md`.
+- Verified with focused duplicate-conflict tests, `go test ./internal/cli -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Changed Personal Server bootstrap marker polling to use the same check-aware Tailscale SSH runner as reachability checks, without `BatchMode=yes`, while still keeping marker JSON stdout separate from stderr and surfacing Tailscale check URLs.
+- Updated the live-validation SSH runner to use the same check-aware path for provisioning and post-provisioning SSH checks.
+- Tightened Tailnet Policy SSH rule safety so exact-scope `accept` rules and exact-scope `check` rules without `checkPeriod: "always"` are rejected before provisioning instead of being left beside a newly appended rule.
+- Changed post-confirmation Tailnet Policy apply to abort when the re-read plan differs from the accepted preview, preventing unreviewed concurrent policy mutations.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused SSH and Tailnet Policy regression tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 16 as the next highest-priority agent-owned task because Issue 10 remains blocked on human live-validation credentials, and existing-server verification still needed a clear guard for missing Tailscale Credentials.
+- Added Issue 16 to track requiring Tailscale Credentials before verifying an existing saved Tailscale Personal Server.
+- Used a focused TDD slice to reproduce that `myn configure` could verify a saved Tailscale Personal Server without saved Tailscale Credentials when the device lookup path answered.
+- Updated existing-server verification to fail with `myn auth tailscale` guidance before any Tailscale device lookup when saved Tailscale Credentials are missing.
+- Updated Issue 16 status and acceptance criteria in `issues.md`.
+- Verified with focused existing-server verification tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 17 as the next highest-priority agent-owned task after finding that `myn configure` created the ten-minute Tailscale Machine Auth Key before Personal Server Firewall creation or reconciliation.
+- Added Issue 17 to track moving Machine Auth Key creation until after firewall readiness while keeping it after Tailnet Policy apply and immediately before cloud-init rendering and server creation.
+- Used a focused TDD slice to first reproduce the old ordering and the firewall-failure key leak, then moved `ensurePersonalServerFirewall` before Machine Auth Key creation.
+- Updated auth-key failure coverage to reflect the new boundary: a key failure can now happen after reusable firewall readiness, but still stops before cloud-init rendering, server creation, and Personal Server Configuration save.
+- Updated Issue 17 status and acceptance criteria in `issues.md`.
+- Verified with focused Machine Auth Key/firewall ordering tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 18 as the next highest-priority agent-owned task after finding a remaining `BatchMode=yes` fallback in the Personal Server SSH runner, while Issue 10 remains blocked on human live-validation credentials.
+- Added Issue 18 to track removing the fallback non-interactive SSH behavior from Personal Server bootstrap polling support.
+- Used a focused TDD slice to first make `TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout` fail when `BatchMode=yes` is present, then removed the option while preserving ordinary `ssh`, `StrictHostKeyChecking=accept-new`, `ConnectTimeout=10`, stdout-only success output, and stderr diagnostics on failure.
+- Updated Issue 18 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./internal/cli -run TestDefaultPersonalServerSSHRunnerReturnsOnlyStdout -count=1`, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Addressed the actionable `# Review notes` only.
+- Guarded Homebrew/GitHub-dependent bootstrap work behind an IPv4 egress check for GitHub, raw GitHub content, codeload, and GHCR; when unavailable, bootstrap now records a partial failure and can still write the success marker.
+- Moved the one-off Tailscale Machine Auth Key out of cloud-init `write_files`; cloud-init now creates the root-only `/run/myn/tailscale-auth-key` from `bootcmd` and immediately redacts persisted cloud-init user-data copies before `tailscale up`.
+- Changed bootstrap marker waiting to run the marker poll loop inside one check-aware Tailscale SSH session instead of opening a new SSH session for every poll.
+- Removed the resolved `# Review notes` section from `issues.md`.
+- Verified with focused bootstrap/provisioning regression tests and `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 19 as the next highest-priority agent-owned task because Issue 10 remains human-gated, and the live validation harness still treated the newly supported Homebrew IPv4-egress partial failure as a hard live-validation failure.
+- Added Issue 19 to track aligning gated live validation with the current IPv6-only bootstrap behavior when Homebrew/GitHub IPv4 egress is unavailable.
+- Used a focused TDD slice to first reproduce that a successful bootstrap marker with the documented Homebrew IPv4-egress partial failure still failed live validation for missing `brew`, then taught marker validation to require only Tailscale and Docker versions for that case while still requiring Homebrew-managed versions otherwise.
+- Threaded the parsed bootstrap marker into remote live checks so nvm/Node validation is skipped only for the documented Homebrew skip, while Docker, Git identity, disabled system OpenSSH, and no-Mosh checks still run.
+- Updated Issue 19 status and acceptance criteria in `issues.md`.
+- Verified with focused live-validation tests, `go test ./...` from `go/cli`, and `git diff --check`.

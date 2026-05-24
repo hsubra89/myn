@@ -22,7 +22,7 @@
     "pr": {
       "source": "hsubra89/skills",
       "sourceType": "github",
-      "skillPath": "skills/create-pr/SKILL.md",
+      "skillPath": "skills/pr/SKILL.md",
       "computedHash": "841c3a3982f59ef023fc1e3ef167c0ed14852f9c1ef45f261b83594a871511d7"
     },
     "setup-matt-pocock-skills": {

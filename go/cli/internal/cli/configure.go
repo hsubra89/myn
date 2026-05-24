@@ -160,11 +160,15 @@ func runConfigure(out io.Writer, opts configureOptions, deps configureDeps) erro
 	cfg.Projects.LocalRoot = localRoot
 	cfg.Projects.RemoteRoot = remoteRoot
 
-	sshResult, sshErr := configureSSHIdentity(opts, cfg, home, deps)
-	if sshErr == nil {
-		cfg.SSH.IdentityFile = sshResult.identityFile
-	} else if sshResult.clearIdentity {
-		cfg.SSH.IdentityFile = ""
+	sshResult := configureSSHIdentityResult{}
+	var sshErr error
+	if shouldConfigureSSHIdentity(opts, cfg) {
+		sshResult, sshErr = configureSSHIdentity(opts, cfg, home, deps)
+		if sshErr == nil {
+			cfg.SSH.IdentityFile = sshResult.identityFile
+		} else if sshResult.clearIdentity {
+			cfg.SSH.IdentityFile = ""
+		}
 	}
 
 	if err := saveAppConfig(appConfigPath, cfg); err != nil {
@@ -189,6 +193,13 @@ func runConfigure(out io.Writer, opts configureOptions, deps configureDeps) erro
 		return personalServerErr
 	}
 	return nil
+}
+
+func shouldConfigureSSHIdentity(opts configureOptions, cfg appConfig) bool {
+	if opts.sshIdentityFileSet {
+		return true
+	}
+	return strings.TrimSpace(cfg.Auth.Hetzner.Token) == ""
 }
 
 func configureLocalRoot(opts configureOptions, cfg appConfig, home string, deps configureDeps) (string, error) {
@@ -497,13 +508,10 @@ func fillConfigureDeps(deps configureDeps) configureDeps {
 	}
 	if deps.personalServerProvisioner == nil {
 		deps.personalServerProvisioner = personalServerProvisioningGate{
-			userHomeDir:     deps.userHomeDir,
-			stat:            deps.stat,
-			readFile:        deps.readFile,
-			writeFile:       deps.writeFile,
-			chmod:           deps.chmod,
-			sshPublicKey:    deps.sshPublicKey,
-			currentUsername: deps.currentUsername,
+			tailnetPolicyEnabled: true,
+			openURL:              openBrowserURL,
+			userHomeDir:          deps.userHomeDir,
+			currentUsername:      deps.currentUsername,
 		}
 	}
 	return deps

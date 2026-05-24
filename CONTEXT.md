@@ -28,32 +28,44 @@ _Avoid_: remote machine, default server, Myn Server
 A saved Read & Write Hetzner Cloud API token used by **Myn** for cloud provisioning.
 _Avoid_: hcloud context, cloud login
 
+**Tailscale Credentials**:
+A saved Tailscale API access token and tailnet identifier used by **Myn** for tailnet policy checks, policy edits, device lookup, and one-off machine auth key creation.
+_Avoid_: Tailscale login, local Tailscale session, machine auth key
+
 **Location**:
 A Hetzner Cloud location where a **Personal Server** can be created.
 _Avoid_: region, datacenter
 
 **Personal Server Configuration**:
-The saved connection identity and addresses of a created **Personal Server**.
+The saved identity of a created **Personal Server**: server ID, **Personal Server User**, Tailscale hostname, and public IPv6 inventory address.
 _Avoid_: Hetzner config, remote config
 
 **Personal Server Firewall**:
-A reusable Hetzner Cloud firewall named `myn-personal-server` that is created by **Myn** for **Personal Server** instances and editable by the user after creation.
+A reusable Hetzner Cloud firewall named `myn-personal-server` that is created by **Myn** for **Personal Server** instances and reconciled to no public inbound rules when it is clearly Myn-managed.
 _Avoid_: SSH-only firewall, generated firewall
 
-**Personal Server SSH Key**:
-A Hetzner Cloud SSH key resource created from the configured local SSH identity for **Personal Server** access.
-_Avoid_: remote key, uploaded key
+**Tailscale Host**:
+The plain Tailscale hostname assigned to a **Personal Server** and used by **Personal Server Connections**.
+_Avoid_: public host, SSH alias
 
-**Personal Server SSH Hardening Profile**:
-A server-side OpenSSH daemon drop-in that restricts SSH access on a **Personal Server** after bootstrap.
-_Avoid_: default ssh config, SSH client config
+**Tailnet Policy**:
+The Tailscale access policy that grants the current Tailscale identity network and Tailscale SSH access to `tag:myn-personal-server`.
+_Avoid_: SSH config, local firewall rule
+
+**Tailscale Machine Auth Key**:
+A one-off, tagged, pre-approved, non-ephemeral Tailscale auth key that **Myn** creates during **Personal Server** provisioning and passes only to first-boot cloud-init.
+_Avoid_: Tailscale Credentials, API token
+
+**Tailscale SSH Access**:
+Tailscale-provided SSH access to a **Personal Server** over the tailnet, authorized by **Tailnet Policy**.
+_Avoid_: public SSH, OpenSSH hardening profile
 
 **Mosh Access**:
-UDP-based interactive shell access installed and opened by default for a **Personal Server**.
-_Avoid_: optional roaming shell, manual UDP access
+Legacy UDP-based interactive shell access that is not installed or opened for new **Personal Servers**.
+_Avoid_: default Personal Server access
 
 **Personal Server Connection**:
-An SSH-backed interactive connection that opens a **Project Session** on the configured **Personal Server**.
+An SSH-backed interactive connection over **Tailscale SSH Access** that opens a **Project Session** on the configured **Personal Server**.
 _Avoid_: raw SSH session, Mosh session, remote shell
 
 **myn connect**:
@@ -77,7 +89,7 @@ A tmux-backed interactive workspace scoped to one **Project** on the **Personal 
 _Avoid_: raw tmux session, shell, terminal
 
 **Personal Server User**:
-A Linux user account created on a **Personal Server** from a normalized form of the current local username.
+A Linux user account created on a **Personal Server** from a normalized form of the current Tailscale identity, editable during provisioning.
 _Avoid_: remote user, cloud user
 
 **Server Type**:
@@ -102,17 +114,14 @@ _Avoid_: prompt lease, terminal lock
 
 ## Relationships
 
-- A **Personal Server** trusts the configured SSH identity for bootstrap-time root login and ongoing **Personal Server User** login.
-- A **Personal Server** disables root SSH after the **Personal Server Bootstrap** completes.
-- A **Personal Server SSH Hardening Profile** is installed during **Personal Server Bootstrap** and allows SSH login only for the **Personal Server User**.
-- The **Personal Server SSH Hardening Profile** is installed at `/etc/ssh/sshd_config.d/20-myn-hardening.conf`.
-- The **Personal Server SSH Hardening Profile** is applied only to newly provisioned **Personal Servers**.
-- A **Personal Server SSH Hardening Profile** names exactly the **Personal Server User** in `AllowUsers`.
-- A **Personal Server SSH Hardening Profile** disables SSH agent forwarding by default.
-- A **Personal Server SSH Hardening Profile** allows only local TCP forwarding by default.
-- A **Personal Server SSH Hardening Profile** requires public-key SSH authentication and disables password-style SSH authentication.
-- A **Personal Server SSH Hardening Profile** uses conservative OpenSSH daemon defaults for login grace time, authentication retries, unauthenticated connection limits, X11 forwarding, host-based trust, tunnels, user-controlled environment, banners, logging, and idle client detection.
-- A **Personal Server Connection** uses SSH rather than **Mosh Access**.
+- A **Personal Server** joins the user's tailnet during **Personal Server Bootstrap** and uses **Tailscale SSH Access** as the only supported interactive access path.
+- A **Personal Server** does not trust a configured local SSH identity for bootstrap or ongoing login.
+- A **Personal Server** does not expose public inbound SSH or **Mosh Access**.
+- A **Personal Server** disables system OpenSSH after `tailscale up --ssh` succeeds.
+- A **Personal Server** is tagged `tag:myn-personal-server` in Tailscale.
+- A **Tailnet Policy** grants the current Tailscale identity network access to `tag:myn-personal-server` on port `22`.
+- A **Tailnet Policy** grants Tailscale SSH access only as the configured **Personal Server User** with `checkPeriod: "always"`.
+- A **Personal Server Connection** uses ordinary `ssh` to the saved **Tailscale Host** and relies on Tailscale SSH interception and policy.
 - A **Project** can have multiple **Project Sessions**.
 - A **Personal Server Connection** opens a **Project Session** for the target **Project**.
 - A **Project** has a stable default **Project Session** plus optional numbered sibling **Project Sessions**.
@@ -137,15 +146,15 @@ _Avoid_: prompt lease, terminal lock
 - A **Personal Server Connection** relies on the **Personal Server User** login shell PATH to find tmux.
 - A **Personal Server Connection** runs its remote tmux handoff through Bash login-shell command evaluation.
 - A **Personal Server Connection** trusts the saved **Personal Server Configuration** and does not require **Hetzner Credentials** or Hetzner API verification before connecting.
-- A **Personal Server Connection** uses the saved IPv4 address first and falls back to the saved IPv6 address only when IPv4 is unavailable.
-- A **Personal Server Connection** passes the **Personal Server User** to SSH separately with `-l` and passes IPv6 literals as unbracketed host arguments.
+- A **Personal Server Connection** uses the saved **Tailscale Host** directly and does not fall back to public IPv4 or IPv6.
+- A **Personal Server Connection** passes the **Personal Server User** to SSH separately with `-l`.
 - A **Personal Server Connection** does not create an **Idle Lease** in the initial implementation.
 - A **Personal Server Connection** requires terminal-backed stdin and stdout.
 - A **Personal Server Connection** requests one SSH TTY allocation.
-- A **Personal Server Connection** always passes the configured SSH identity explicitly to SSH.
+- A **Personal Server Connection** does not pass a configured SSH identity to SSH.
 - A **Personal Server Connection** uses SSH `StrictHostKeyChecking=accept-new`.
 - A **Personal Server Connection** preserves the SSH/tmux process exit status.
-- A **Personal Server Connection** validates saved configuration, local project root existence, and SSH identity existence before attempting SSH.
+- A **Personal Server Connection** validates saved configuration and local project root existence before attempting SSH.
 - A **Personal Server Connection** stays quiet on successful handoff and prints clear messages only for local validation failures.
 - A **Personal Server Connection** derives the target **Project** from the first path segment under the configured local project root, not from the Git repository root.
 - A **Personal Server Connection** maps local paths lexically under the configured local project root and does not resolve symlink targets for project containment.
@@ -201,9 +210,15 @@ _Avoid_: prompt lease, terminal lock
 - All user-visible namespaces use `myn`, including config paths, environment variables, runtime lease directories, cloud resource names, Hetzner labels, bootstrap files, shell profile files, and local development launchers.
 - Documentation uses **Myn** in prose and `myn` for the command name; pronunciation belongs in introductory documentation, not command help.
 - Planning and decision documents keep their technical rationale but use the **Myn** namespace consistently.
-- **Myn** uses the command structure `auth hetzner`, `configure`, `connect` (`c`), `connect-new` (`cn`), `sessions` (`s`, `l`), `idle status`, `run`, and `version`.
-- **Personal Server** prompts run only after local roots and the SSH identity are configured.
-- **Personal Server** creation is skipped unless a valid SSH identity is configured.
+- **Myn** uses the command structure `auth hetzner`, `auth tailscale`, `configure`, `connect` (`c`), `connect-new` (`cn`), `sessions` (`s`, `l`), `idle status`, `run`, and `version`.
+- `myn auth tailscale` opens the Tailscale Keys page, validates a Tailscale API access token through the cloud API, discovers or accepts a tailnet identifier, and saves **Tailscale Credentials**.
+- `myn auth tailscale` validates policy read, policy validate, no-op policy update, device list, and auth key creation capabilities before saving **Tailscale Credentials**.
+- `myn auth tailscale` accepts `TAILSCALE_API_TOKEN` and `TAILSCALE_TAILNET` for automation.
+- `myn auth tailscale` does not require the local Tailscale daemon to be running.
+- **Personal Server** prompts run only after local roots, **Hetzner Credentials**, **Tailscale Credentials**, and local Tailscale daemon connectivity are available.
+- **Personal Server** provisioning requires a running local Tailscale daemon but does not require the local `tailscale` CLI on `PATH`.
+- The active local tailnet from Tailscale LocalAPI must match the saved **Tailscale Credentials** tailnet before **Personal Server** creation.
+- **Personal Server** creation is skipped unless **Hetzner Credentials** and **Tailscale Credentials** are configured.
 - **Personal Server** provisioning does not clone or sync projects from the local root.
 - **Personal Server Bootstrap** creates the configured remote project root exactly, including spaces, owned by the **Personal Server User**.
 - A **Personal Server** can only be provisioned after **Hetzner Credentials** already exist.
@@ -218,42 +233,50 @@ _Avoid_: prompt lease, terminal lock
 - A **Personal Server** default server name does not include `myn`; supporting cloud resources use `myn` because they are product-managed automation artifacts.
 - A **Personal Server** name is validated locally as a DNS-label-style value before creation.
 - A **Personal Server** is not created when a Hetzner server with the chosen name already exists.
+- A **Personal Server** is not created when a Tailscale device already uses the chosen **Tailscale Host**.
 - A **Personal Server** uses Hetzner's latest non-deprecated Ubuntu system image, selected by highest Ubuntu version.
-- A **Personal Server** is created with both IPv4 and IPv6 enabled through server creation public network options.
+- A **Personal Server** is created with public IPv4 disabled and public IPv6 enabled through server creation public network options.
 - Hetzner resources created for a **Personal Server** are labeled `managed_by=myn` and `role=personal_server`.
+- Hetzner server labels include the **Tailscale Host** for inventory only.
 - Hetzner labels are for visibility only and are not used to auto-adopt missing **Personal Server Configuration**.
-- **Myn** waits for Hetzner create actions to finish before root SSH and bootstrap polling.
-- Hetzner API calls, root SSH polling, and bootstrap polling respect command cancellation.
+- **Myn** waits for Hetzner create actions to finish before Tailscale device registration, Tailscale SSH reachability, and bootstrap marker polling.
+- Hetzner API calls, Tailscale API calls, Tailscale SSH polling, and bootstrap polling respect command cancellation.
 - A **Personal Server Configuration** belongs in its own top-level config section.
-- A **Personal Server Configuration** stores `serverID`, **Personal Server User**, `ipv4`, and the assigned `ipv6` address, not ongoing desired state for mutable server details.
-- A **Personal Server Configuration** is incomplete for connection without `serverID`, **Personal Server User**, and at least one saved address.
+- A **Personal Server Configuration** stores `serverID`, **Personal Server User**, `tailscaleHost`, and the assigned `ipv6` address, not ongoing desired state for mutable server details.
+- A **Personal Server Configuration** is incomplete for connection without **Personal Server User** and `tailscaleHost`.
+- A **Personal Server Configuration** is incomplete as a provisioned server record without `serverID`, **Personal Server User**, `tailscaleHost`, and the assigned `ipv6` address.
 - **Location**, **Server Type**, and proposed server name selections are transient until a **Personal Server** is created.
-- When **Personal Server Configuration** is complete for connection, `myn configure` skips creation by default and reports the saved server ID and IP addresses.
-- A complete saved **Personal Server Configuration** server ID is verified against Hetzner before creation is skipped.
+- When **Personal Server Configuration** is complete for connection, `myn configure` skips creation by default and reports the saved server ID, **Tailscale Host**, and public IPv6 inventory address.
+- A complete saved **Personal Server Configuration** server ID is verified against Hetzner and its **Tailscale Host** is verified against Tailscale before creation is skipped.
+- If the Hetzner server exists but the Tailscale device is missing, `myn configure` fails without attempting automated repair.
+- Legacy public-SSH **Personal Server Configurations** fail with a migration message instead of being cleared automatically.
 - If a saved **Personal Server** server ID is missing in Hetzner, interactive `configure` asks before clearing it and non-interactive `configure` fails.
 - **Personal Server** creation is interactive-only; non-interactive `configure` does not create a server.
 - Missing **Hetzner Credentials** do not block saving local configuration; they only skip **Personal Server** creation.
+- Missing **Tailscale Credentials** do not block saving local configuration; they only skip **Personal Server** creation.
+- `myn configure` computes the required **Tailnet Policy** before final confirmation and validates the current or proposed policy without mutating it.
+- If **Tailnet Policy** changes are needed, `myn configure` opens the Tailscale Access Controls page, shows a semantic summary, and asks before editing through the Tailscale API.
+- `myn configure` applies **Tailnet Policy** changes only after final **Personal Server** creation confirmation, and before creating the **Tailscale Machine Auth Key** or Hetzner server.
+- **Tailnet Policy** edits use grants for network access, preserve unrelated legacy ACL entries, are idempotent, and use ETag protection.
+- **Tailnet Policy** edits do not add policy tests.
+- `myn configure` creates a fresh one-off **Tailscale Machine Auth Key** with a ten minute expiry immediately before the Hetzner server create request.
 - Interactive `configure` asks for explicit final confirmation before creating a **Personal Server**.
 - A created **Personal Server** is saved in **Personal Server Configuration** even if the **Personal Server Bootstrap** fails or times out.
-- `myn configure` reports SSH commands with `-i` for the configured SSH identity and `-l` for the login user, with IPv4 first.
-- `myn configure` reports **Mosh Access** commands for the **Personal Server User** after **Personal Server** creation, with IPv4 first and the configured SSH identity passed explicitly.
-- `myn configure` reports **Mosh Access** commands only after successful **Personal Server Bootstrap**.
-- After successful **Personal Server Bootstrap**, `myn configure` reports only **Personal Server User** access commands, not root SSH commands.
-- If **Personal Server Bootstrap** fails or times out before SSH hardening takes effect, `myn configure` reports root SSH commands as a recovery path.
-- `myn configure` saves local roots and SSH identity before attempting **Personal Server** creation, then saves **Personal Server Configuration** after server creation succeeds.
+- `myn configure` reports public IPv6 only as inventory and does not print public SSH or **Mosh Access** commands.
+- After successful **Personal Server Bootstrap**, `myn configure` reports the saved **Tailscale Host** and `myn connect`.
+- If **Personal Server Bootstrap** fails or times out, `myn configure` does not report root SSH commands as a recovery path.
+- `myn configure` saves local roots before attempting **Personal Server** creation, then saves **Personal Server Configuration** after server creation succeeds.
 - After **Personal Server Bootstrap** completes, `myn configure` reports installed tool versions from the completion marker.
-- **Personal Server** provisioning is implemented separately from local root and SSH identity configuration.
-- A **Personal Server Firewall** is created by **Myn** with an initially minimal rule set and may be expanded by the user.
+- **Personal Server** provisioning is implemented separately from local root configuration.
+- A **Personal Server Firewall** is created by **Myn** with no public inbound rules.
 - A **Personal Server Firewall** can be reused by multiple **Personal Server** instances over time.
-- An existing **Personal Server Firewall** is treated as user-editable and is not reset by **Myn**.
-- A newly created **Personal Server Firewall** allows inbound SSH and **Mosh Access** from all IPv4 and IPv6 sources and no other inbound access.
-- **Mosh Access** uses Mosh's default UDP `60000-61000` port range.
-- Existing **Personal Server Firewalls** are not modified to add **Mosh Access**.
-- When `myn configure` reuses an existing **Personal Server Firewall**, it reports that firewall rules are left untouched and **Mosh Access** may require the user-managed UDP rule.
-- A **Personal Server SSH Key** is reused when Hetzner already has the same public key fingerprint.
+- An existing **Personal Server Firewall** with Myn labels is reconciled to no public inbound rules.
+- An existing `myn-personal-server` firewall without Myn labels is not modified; provisioning fails with a clear message.
+- **Mosh Access** is not installed, opened, or printed for new **Personal Servers**.
 - Supporting resources created for a **Personal Server** are not automatically cleaned up if server creation fails.
-- A **Personal Server User** is derived from the current local username as a lowercase letters, digits, and hyphens value.
-- If the local username cannot be normalized into a valid **Personal Server User**, `myn configure` prompts for one.
+- A **Personal Server User** defaults from the current Tailscale identity as a lowercase letters, digits, and hyphens value.
+- If the current Tailscale identity cannot be normalized into a valid **Personal Server User**, `myn configure` prompts for one.
+- The **Personal Server User** prompt remains editable even when the Tailscale-derived default is valid.
 - A **Personal Server User** starts with Bash as the login shell.
 - A **Personal Server User** belongs to the `sudo` and `docker` groups.
 - A **Personal Server User** has sudo access, but sudo requires a password.
@@ -265,20 +288,24 @@ _Avoid_: prompt lease, terminal lock
 - A **Personal Server Bootstrap** runs through cloud-init during server creation.
 - **Personal Server Bootstrap** cloud-init user data is rendered through a typed Go render function using a YAML library.
 - A **Personal Server Bootstrap** installs the latest Ubuntu security updates after the **Personal Server** is created, enables unattended security upgrades, and reboots automatically if required.
-- **Personal Server Bootstrap** installs `mosh` as an apt-managed system package for **Mosh Access**.
+- **Personal Server Bootstrap** installs and joins Tailscale before the rest of the development tool bootstrap.
+- **Personal Server Bootstrap** runs `tailscale up` with a one-off **Tailscale Machine Auth Key**, the selected **Tailscale Host**, and Tailscale SSH enabled.
+- **Personal Server Bootstrap** handles the **Tailscale Machine Auth Key** through a root-only file and removes it after successful Tailscale join.
+- **Personal Server Bootstrap** disables system OpenSSH after Tailscale SSH is enabled.
+- **Personal Server Bootstrap** does not write `ssh_authorized_keys` for root or the **Personal Server User**.
+- **Personal Server Bootstrap** does not install `mosh`.
 - A **Personal Server Bootstrap** installs Docker Engine and the compose plugin from Docker's official apt repository.
 - **Personal Server** creation is not considered complete until the **Personal Server Bootstrap** finishes.
 - The **Personal Server Bootstrap** writes a completion marker with status, timestamp, reboot information, and installed tool versions that **Myn** polls for over SSH.
-- `myn configure` reads the **Personal Server Bootstrap** completion marker over root SSH first and can fall back to **Personal Server User** SSH after hardening disables root SSH.
-- The **Personal Server SSH Hardening Profile** is validated and applied before the **Personal Server Bootstrap** writes a successful completion marker.
-- The **Personal Server Bootstrap** validates the composed OpenSSH daemon configuration before reloading SSH for the **Personal Server SSH Hardening Profile**.
-- The **Personal Server Bootstrap** completion marker is readable by the **Personal Server User** so `myn configure` can observe success after root SSH is disabled.
-- The **Personal Server Bootstrap** completion marker reports the installed `mosh` version.
-- The **Personal Server Bootstrap** must finish within five minutes after the **Personal Server** first accepts root SSH.
-- Automatic reboot downtime counts against the five-minute **Personal Server Bootstrap** timeout.
+- `myn configure` waits up to eight minutes for Tailscale device registration, expected tag, authorization, online state, and SSH reachability through the **Tailscale Host**.
+- `myn configure` reads the **Personal Server Bootstrap** completion marker over Tailscale SSH as the **Personal Server User**.
+- The **Personal Server Bootstrap** completion marker is readable by the **Personal Server User**.
+- The **Personal Server Bootstrap** completion marker reports the installed `tailscale` version.
+- The **Personal Server Bootstrap** must finish within five minutes after the **Personal Server** first accepts Tailscale SSH.
+- Automatic reboot downtime after Tailscale SSH reachability counts against the five-minute **Personal Server Bootstrap** timeout.
 - The **Personal Server Bootstrap** install plan is shown before final creation confirmation.
 - The **Personal Server Bootstrap** install plan groups system services, Homebrew tools, and coding agents separately.
-- The **Personal Server Bootstrap** install plan mentions the **Personal Server SSH Hardening Profile** because it changes the access model after bootstrap.
+- The **Personal Server Bootstrap** install plan mentions Tailscale-only access, Tailscale SSH, IPv6-only public networking, no public inbound firewall rules, and disabled system OpenSSH.
 - Homebrew and Homebrew-installed tools belong to the **Personal Server User**, not root.
 - **Personal Server Bootstrap** does not copy local dotfiles or shell configuration beyond required Homebrew, nvm, Git identity setup, and the repo-owned **Personal Server tmux Profile**.
 - **Personal Server Bootstrap** installs the **Personal Server tmux Profile** for the **Personal Server User** instead of reading the user's local `~/.tmux.conf` at provisioning time.
@@ -297,11 +324,9 @@ _Avoid_: prompt lease, terminal lock
 - Codex is installed as the **Personal Server User** with the nvm-managed LTS Node.js npm.
 - Claude Code is installed as the **Personal Server User** with its official installer script.
 - Coding agent installation failures do not fail the **Personal Server Bootstrap**; they are reported as partial failures.
-- **Personal Server Bootstrap** hard-fails system update/security setup, user creation, SSH authorization, remote project root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup.
+- **Personal Server Bootstrap** hard-fails system update/security setup, user creation, Tailscale install/join, remote project root creation, Homebrew, Docker, core Homebrew tools, nvm, and LTS Node/npm setup.
 - **Personal Server Bootstrap** hard-fails writing the **Personal Server tmux Profile**.
-- **Personal Server Bootstrap** hard-fails `mosh` installation because **Mosh Access** is default Personal Server access.
-- **Personal Server Bootstrap** hard-fails applying the **Personal Server SSH Hardening Profile** because hardened SSH is part of the Personal Server security contract.
-- A **Personal Server SSH Hardening Profile** failure is reported clearly before `myn configure` shows root SSH recovery commands.
+- **Personal Server Bootstrap** hard-fails disabling system OpenSSH after Tailscale SSH is enabled.
 - A **Stdio Lease** is active only while the wrapped command still exists and terminal input or output is recent.
 - A quiet **Stdio Lease** can become idle while the wrapped command is still waiting at a prompt.
 - A completed **Stdio Lease** is removed on normal wrapper exit.
@@ -320,13 +345,13 @@ _Avoid_: prompt lease, terminal lock
 > **Dev:** "Should the prompt ask for a region?"
 > **Domain expert:** "No — Hetzner calls this a **Location**, so the CLI should too."
 > **Dev:** "Where should selected cloud details be saved?"
-> **Domain expert:** "In a top-level **Personal Server Configuration**, separate from auth, project roots, and SSH identity."
+> **Domain expert:** "In a top-level **Personal Server Configuration**, separate from auth and project roots."
 > **Dev:** "Should **Personal Server Configuration** store selected Location and Server Type?"
-> **Domain expert:** "No — store only the connection identity and addresses needed to reconnect, because the user can customize the instance after creation."
+> **Domain expert:** "No — store only the server ID, **Personal Server User**, **Tailscale Host**, and public IPv6 inventory address."
 > **Dev:** "Should cloud choices be saved if final creation is declined?"
 > **Domain expert:** "No — they are transient unless a **Personal Server** is actually created."
 > **Dev:** "Should `configure` replace an existing configured **Personal Server**?"
-> **Domain expert:** "No — skip creation by default and report the saved server ID and IP addresses."
+> **Domain expert:** "No — skip creation by default and report the saved server ID, **Tailscale Host**, and public IPv6 inventory address."
 > **Dev:** "Should `configure` trust a saved server ID?"
 > **Domain expert:** "No — verify it exists in Hetzner before skipping creation."
 > **Dev:** "Should stale **Personal Server Configuration** be cleared automatically?"
@@ -338,23 +363,23 @@ _Avoid_: prompt lease, terminal lock
 > **Dev:** "Should `configure` create a **Personal Server** automatically after prompts?"
 > **Domain expert:** "No — ask explicitly before creating cloud resources."
 > **Dev:** "Should `myn configure` delete the server if bootstrap fails?"
-> **Domain expert:** "No — save the created server ID and IP addresses so the user can inspect it."
+> **Domain expert:** "No — save the created server ID, **Tailscale Host**, and public IPv6 inventory address so the user can inspect it."
 > **Dev:** "Should the firewall name describe only SSH?"
-> **Domain expert:** "No — make it obvious **Myn** created it, but leave room for the user to expand it later."
+> **Domain expert:** "No — keep the reusable `myn-personal-server` name, but the desired rule set has no public inbound rules."
 > **Dev:** "If the firewall already exists, should **Myn** restore SSH-only rules?"
-> **Domain expert:** "No — existing rules may be intentional user edits."
-> **Dev:** "Should **Mosh Access** be a manual post-provisioning step?"
-> **Domain expert:** "No — every newly created **Personal Server** should support **Mosh Access** by default."
-> **Dev:** "Should reusing an existing **Personal Server Firewall** ask for another confirmation because **Mosh Access** may need a UDP rule?"
-> **Domain expert:** "No — mention the unchanged firewall rules in the creation plan instead of adding another prompt."
-> **Dev:** "Should initial SSH access be source-restricted?"
-> **Domain expert:** "No — allow SSH from all IPv4 and IPv6 sources."
-> **Dev:** "Can we rely only on cloud-init for SSH access?"
-> **Domain expert:** "No — create or reuse a **Personal Server SSH Key** for root login and also authorize the key for the user account."
-> **Dev:** "Should root SSH be disabled after bootstrap?"
-> **Domain expert:** "Yes — root SSH is only a bootstrap-time control channel; after bootstrap, only the **Personal Server User** should be reachable over SSH."
+> **Domain expert:** "Yes, but only when the existing firewall is clearly Myn-managed; otherwise fail rather than clobbering user-managed rules."
+> **Dev:** "Should **Mosh Access** be installed by default?"
+> **Domain expert:** "No — new **Personal Servers** use Tailscale SSH only."
+> **Dev:** "Should public SSH be available as a recovery path?"
+> **Domain expert:** "No — no public inbound SSH, no root SSH, no local SSH key injection."
+> **Dev:** "Can we rely on cloud-init for Tailscale access?"
+> **Domain expert:** "Yes — cloud-init installs Tailscale first, joins with a one-off tagged key, enables Tailscale SSH, then disables system OpenSSH."
+> **Dev:** "Should Tailscale policy be edited through the API?"
+> **Domain expert:** "Check whether the policy already grants the required access; if not, show a semantic summary, ask, validate, and update with ETag protection."
+> **Dev:** "Should **Myn** create the server's Tailscale auth key?"
+> **Domain expert:** "Yes — create a fresh one-off, tagged, pre-approved key with a ten minute expiry immediately before the Hetzner create request."
 > **Dev:** "Does 'same name as the local user' mean verbatim?"
-> **Domain expert:** "No — create a **Personal Server User** from a Linux-safe normalized local username."
+> **Domain expert:** "No — default the **Personal Server User** from a Linux-safe normalized current Tailscale identity, and keep the prompt editable."
 > **Dev:** "Which login shell should the **Personal Server User** start with?"
 > **Domain expert:** "Bash; the user can change it later."
 > **Dev:** "Should the **Personal Server User** have passwordless sudo?"
@@ -378,15 +403,13 @@ _Avoid_: prompt lease, terminal lock
 > **Dev:** "Can `configure` return once Hetzner accepts the create request?"
 > **Domain expert:** "No — block and poll until the **Personal Server Bootstrap** completes or times out."
 > **Dev:** "How should **Myn** know the **Personal Server Bootstrap** is done?"
-> **Domain expert:** "Poll over SSH for the bootstrap completion marker written by cloud-init."
-> **Dev:** "Should SSH hardening switch bootstrap polling away from root SSH?"
-> **Domain expert:** "Use root SSH first, but allow reading the marker as the **Personal Server User** after the **Personal Server SSH Hardening Profile** disables root SSH."
-> **Dev:** "What if SSH hardening disables root SSH before `myn configure` reads the success marker?"
-> **Domain expert:** "`myn configure` may read the bootstrap marker as the **Personal Server User** after root SSH is closed."
-> **Dev:** "Should bootstrap reload SSH immediately after writing the hardening profile?"
-> **Domain expert:** "No — validate the composed OpenSSH daemon configuration first and fail clearly if the hardening profile cannot be applied."
+> **Domain expert:** "Poll over ordinary `ssh` to the **Tailscale Host** for the bootstrap completion marker written by cloud-init."
+> **Dev:** "Should `myn configure` wait for Tailscale before marker polling?"
+> **Domain expert:** "Yes — wait separately for device registration, expected tag, authorization, online state, and SSH reachability."
+> **Dev:** "Should system OpenSSH remain available after Tailscale SSH is enabled?"
+> **Domain expert:** "No — disable system OpenSSH before writing the success marker."
 > **Dev:** "How long should **Myn** wait for bootstrap?"
-> **Domain expert:** "At most five minutes after the **Personal Server** first accepts root SSH."
+> **Domain expert:** "At most eight minutes for Tailscale join and SSH reachability, then five minutes for the marker after SSH is reachable."
 > **Dev:** "When should users see the software list?"
 > **Domain expert:** "Before final creation confirmation, so it is part of what they approve."
 > **Dev:** "Should Homebrew run as root?"
@@ -407,8 +430,8 @@ _Avoid_: prompt lease, terminal lock
 > **Domain expert:** "No — it does not need to mention the specific tmux configuration."
 > **Dev:** "Should failing to write the **Personal Server tmux Profile** be treated as a partial setup issue?"
 > **Domain expert:** "No — bootstrap should hard-fail because the expected development environment was not created."
-> **Dev:** "Should failing to apply SSH hardening be treated as a partial setup issue?"
-> **Domain expert:** "No — bootstrap should hard-fail, report the hardening failure clearly, and leave root SSH available for recovery."
+> **Dev:** "Should failing to join Tailscale or disable system OpenSSH be treated as a partial setup issue?"
+> **Domain expert:** "No — bootstrap should hard-fail because Tailscale SSH is the only access model."
 > **Dev:** "After seeding the snapshot, should tests keep comparing it to the user's live local `~/.tmux.conf`?"
 > **Domain expert:** "No — the repo-owned snapshot is canonical."
 > **Dev:** "Should bootstrap install a Rust stable toolchain?"
@@ -443,3 +466,5 @@ _Avoid_: prompt lease, terminal lock
 - "GitHub package" was used to mean downloadable CLI assets — resolved: use **Myn Release** assets, not GitHub Packages.
 - "Homebrew-like installer" means **Myn Installer**, not a Homebrew tap or **Personal Server Bootstrap** behavior.
 - "session" now means **Project Session** when discussing `myn connect`, `myn connect-new`, or `myn sessions`.
+- "SSH access" for a new **Personal Server** means **Tailscale SSH Access**, not public OpenSSH access or local SSH key injection.
+- "Tailscale key" can mean either **Tailscale Credentials** or a **Tailscale Machine Auth Key** — resolved: **Tailscale Credentials** are saved API credentials; **Tailscale Machine Auth Keys** are one-off server join credentials and are not saved.

@@ -95,7 +95,7 @@ func TestSaveAppConfigPreservesExistingParentDirectoryMode(t *testing.T) {
 	assertFileMode(t, configPath, 0o600)
 }
 
-func TestPersonalServerConfigurationClassifiesConnectionReadiness(t *testing.T) {
+func TestPersonalServerConfigurationClassifiesTailscaleConnectionReadiness(t *testing.T) {
 	tests := []struct {
 		name      string
 		config    personalServerConfig
@@ -107,61 +107,47 @@ func TestPersonalServerConfigurationClassifiesConnectionReadiness(t *testing.T) 
 			wantState: personalServerConnectionConfigAbsent,
 		},
 		{
-			name: "missing server ID is incomplete",
-			config: personalServerConfig{
-				User: "harish",
-				IPv4: "203.0.113.10",
-			},
-			wantState: personalServerConnectionConfigIncomplete,
-		},
-		{
 			name: "missing Personal Server User is incomplete",
 			config: personalServerConfig{
-				ServerID: 123456,
-				IPv4:     "203.0.113.10",
+				TailscaleHost: "myn-dev",
 			},
 			wantState: personalServerConnectionConfigIncomplete,
 		},
 		{
-			name: "missing saved address",
+			name: "missing Tailscale Host",
+			config: personalServerConfig{
+				User: "harish",
+			},
+			wantState: personalServerConnectionConfigMissingTailscaleHost,
+		},
+		{
+			name: "legacy public SSH config",
 			config: personalServerConfig{
 				ServerID: 123456,
 				User:     "harish",
+				IPv4:     "203.0.113.10",
 			},
-			wantState: personalServerConnectionConfigMissingAddress,
+			wantState: personalServerConnectionConfigLegacyPublicSSH,
 		},
 		{
-			name: "ready selects IPv4 before IPv6",
+			name: "ready with Tailscale Host",
 			config: personalServerConfig{
-				ServerID: 123456,
-				User:     " harish ",
-				IPv4:     " 203.0.113.10 ",
-				IPv6:     "2001:db8::1",
+				User:          " harish ",
+				TailscaleHost: " myn-dev ",
+				IPv4:          "203.0.113.10",
+				IPv6:          "2001:db8::1",
 			},
 			wantState: personalServerConnectionConfigReady,
 			want: personalServerConnectionConfig{
 				User: "harish",
-				Host: "203.0.113.10",
-			},
-		},
-		{
-			name: "ready falls back to IPv6",
-			config: personalServerConfig{
-				ServerID: 123456,
-				User:     "harish",
-				IPv6:     " 2001:db8::1 ",
-			},
-			wantState: personalServerConnectionConfigReady,
-			want: personalServerConnectionConfig{
-				User: "harish",
-				Host: "2001:db8::1",
+				Host: "myn-dev",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotState, got := tt.config.connectionConfigState()
+			gotState, got := tt.config.tailscaleConnectionConfigState()
 			if gotState != tt.wantState {
 				t.Fatalf("state mismatch: want %v, got %v", tt.wantState, gotState)
 			}

@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -47,8 +49,7 @@ type personalServerCreateCloudClient interface {
 	Images(ctx context.Context) ([]personalServerImage, error)
 	FirewallByName(ctx context.Context, name string) (personalServerFirewall, bool, error)
 	CreateFirewall(ctx context.Context, firewall personalServerFirewall) (personalServerFirewall, []personalServerAction, error)
-	SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error)
-	CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error)
+	SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error)
 	CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error)
 	WaitActions(ctx context.Context, actions []personalServerAction) error
 }
@@ -85,14 +86,6 @@ type personalServerFirewallRule struct {
 	SourceIPs []string
 }
 
-type personalServerSSHKey struct {
-	ID          int
-	Name        string
-	Fingerprint string
-	PublicKey   string
-	Labels      map[string]string
-}
-
 type personalServerAction struct {
 	ID     int
 	Status string
@@ -104,7 +97,6 @@ type personalServerCreateServerRequest struct {
 	ServerTypeName string
 	ImageID        int
 	ImageName      string
-	SSHKeyID       int
 	FirewallID     int
 	UserData       string
 	Labels         map[string]string
@@ -175,16 +167,16 @@ type personalServerCreationInputs struct {
 }
 
 type personalServerCreationPlan struct {
-	Location                   personalServerLocation
-	ServerType                 personalServerType
-	User                       string
-	ServerName                 string
-	PasswordHash               string
-	GitIdentity                personalServerGitIdentity
-	RemoteProjectRoot          string
-	SSHIdentityFile            string
-	ExistingFirewall           bool
-	PrimaryIPv4MonthlyGrossEUR string
+	Location          personalServerLocation
+	ServerType        personalServerType
+	User              string
+	ServerName        string
+	PasswordHash      string
+	GitIdentity       personalServerGitIdentity
+	RemoteProjectRoot string
+	TailscaleIdentity string
+	TailnetPolicy     personalServerTailnetPolicyPlan
+	ExistingFirewall  bool
 }
 
 type personalServerGitIdentity struct {
@@ -200,30 +192,31 @@ const (
 )
 
 type personalServerProvisioningGate struct {
-	newCloudClient     func(token string) personalServerCloudClient
-	saveConfig         func(path string, cfg appConfig) error
-	runSSH             personalServerSSHRunner
-	sleep              func(context.Context, time.Duration) error
-	bootstrapTimeout   time.Duration
-	sshPollInterval    time.Duration
-	userHomeDir        func() (string, error)
-	stat               func(string) (os.FileInfo, error)
-	readFile           func(string) ([]byte, error)
-	writeFile          func(string, []byte, os.FileMode) error
-	chmod              func(string, os.FileMode) error
-	sshPublicKey       func(string) (string, error)
-	currentUsername    func() string
-	gitConfigValue     func(scope personalServerGitConfigScope, key string) (string, bool)
-	passwordSaltReader io.Reader
+	newCloudClient                   func(token string) personalServerCloudClient
+	newLocalTailscaleClient          func() personalServerLocalTailscaleClient
+	newTailscaleCloudClient          func(tailscaleConfig) personalServerTailscaleCloudClient
+	newTailnetPolicyClient           func(tailscaleConfig) personalServerTailnetPolicyClient
+	newTailscaleMachineAuthKeyClient func(tailscaleConfig) personalServerTailscaleMachineAuthKeyClient
+	newTailscaleDeviceClient         func(tailscaleConfig) personalServerTailscaleDeviceClient
+	tailnetPolicyEnabled             bool
+	openURL                          func(string) error
+	saveConfig                       func(path string, cfg appConfig) error
+	renderBootstrap                  func(personalServerBootstrapInput) (string, error)
+	runSSH                           personalServerSSHRunner
+	runTailscaleSSHCheck             personalServerTailscaleSSHCheckRunner
+	sleep                            func(context.Context, time.Duration) error
+	bootstrapTimeout                 time.Duration
+	tailscaleAccessTimeout           time.Duration
+	sshPollInterval                  time.Duration
+	userHomeDir                      func() (string, error)
+	currentUsername                  func() string
+	gitConfigValue                   func(scope personalServerGitConfigScope, key string) (string, bool)
+	passwordSaltReader               io.Reader
 }
 
 func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, prompter configurePrompter) error {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if strings.TrimSpace(cfg.SSH.IdentityFile) == "" {
-		fmt.Fprintln(out, "Personal Server creation skipped: SSH identity is not configured.")
-		return nil
 	}
 	token := strings.TrimSpace(cfg.Auth.Hetzner.Token)
 	if token == "" {
@@ -231,27 +224,28 @@ func (gate personalServerProvisioningGate) Configure(ctx context.Context, out io
 		return nil
 	}
 
-	connectionState, _ := cfg.PersonalServer.connectionConfigState()
-	if connectionState == personalServerConnectionConfigReady {
+	connectionState, _ := cfg.PersonalServer.tailscaleConnectionConfigState()
+	if connectionState == personalServerConnectionConfigReady && cfg.PersonalServer.ServerID != 0 {
 		return gate.verifyConfiguredPersonalServer(ctx, out, appConfigPath, cfg, token, prompter)
+	}
+	if connectionState == personalServerConnectionConfigReady {
+		connectionState = personalServerConnectionConfigIncomplete
+	}
+	if connectionState == personalServerConnectionConfigLegacyPublicSSH {
+		fmt.Fprintln(out, "Legacy public-SSH Personal Server Configuration is no longer supported; recreate the Personal Server with Tailscale-only provisioning.")
+		return connectionState.validationError()
 	}
 	if connectionState != personalServerConnectionConfigAbsent {
 		return gate.clearIncompletePersonalServerConfiguration(ctx, out, appConfigPath, cfg, token, prompter, connectionState)
 	}
 
-	if !prompter.CanPrompt() {
-		fmt.Fprintln(out, "Personal Server creation skipped: configure is running non-interactively.")
-		return nil
-	}
-
-	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+	return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }
 
 func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfiguration(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter, state personalServerConnectionConfigState) error {
 	switch state {
-	case personalServerConnectionConfigMissingAddress:
-		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Personal Server address.")
+	case personalServerConnectionConfigMissingTailscaleHost:
+		fmt.Fprintln(out, "Personal Server Configuration is missing a saved Tailscale Host.")
 	default:
 		fmt.Fprintln(out, "Personal Server Configuration is incomplete.")
 	}
@@ -272,8 +266,7 @@ func (gate personalServerProvisioningGate) clearIncompletePersonalServerConfigur
 		return err
 	}
 	fmt.Fprintln(out, "Cleared incomplete Personal Server Configuration.")
-	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+	return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
 }
 
 func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, token string, prompter configurePrompter) error {
@@ -301,17 +294,46 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx co
 			return err
 		}
 		fmt.Fprintln(out, "Cleared stale Personal Server Configuration.")
-		fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
-		return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+		return gate.preparePersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter)
+	}
+
+	tailscaleHost := strings.TrimSpace(cfg.PersonalServer.TailscaleHost)
+	if !cfg.Auth.Tailscale.isConfigured() {
+		return fmt.Errorf("Tailscale Credentials are not configured; run `myn auth tailscale` first")
+	}
+	if _, found, err := gate.findPersonalServerTailscaleDevice(ctx, gate.tailscaleDeviceClient(cfg.Auth.Tailscale), tailscaleHost); err != nil {
+		return fmt.Errorf("verify Tailscale Host %q in saved tailnet: %w", tailscaleHost, err)
+	} else if !found {
+		return fmt.Errorf("Personal Server Configuration references Tailscale Host %q, but no matching Tailscale device exists in saved tailnet; repair the device manually or recreate the Personal Server", tailscaleHost)
 	}
 
 	fmt.Fprintf(out, "Personal Server already configured: server %d exists.\n", cfg.PersonalServer.ServerID)
-	fmt.Fprintf(out, "Saved addresses: %s\n", formatPersonalServerAddresses(cfg.PersonalServer.IPv4, cfg.PersonalServer.IPv6))
-	fmt.Fprintf(out, "Current addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
+	fmt.Fprintf(out, "Saved Tailscale Host: %s\n", tailscaleHost)
+	fmt.Fprintf(out, "Saved public IPv6 inventory: %s\n", displayPersonalServerAddress(cfg.PersonalServer.IPv6))
+	fmt.Fprintf(out, "Current Hetzner state: server %d exists (%s), public IPv6 %s.\n", server.ID, displayPersonalServerName(server.Name), displayPersonalServerAddress(server.IPv6))
 	return nil
 }
 
-func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
+func (gate personalServerProvisioningGate) preparePersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter) error {
+	if !prompter.CanPrompt() {
+		fmt.Fprintln(out, "Personal Server creation skipped: configure is running non-interactively.")
+		return nil
+	}
+	if !cfg.Auth.Tailscale.isConfigured() {
+		fmt.Fprintln(out, "Personal Server creation skipped: Tailscale Credentials are not configured. Run `myn auth tailscale` first.")
+		return nil
+	}
+
+	localStatus, err := gate.verifyLocalTailscaleForPersonalServerCreation(ctx, cfg.Auth.Tailscale)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out, "Personal Server provisioning prerequisites are ready.")
+	return gate.previewPersonalServerCreation(ctx, out, appConfigPath, token, cfg, prompter, localStatus)
+}
+
+func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx context.Context, out io.Writer, appConfigPath string, token string, cfg appConfig, prompter configurePrompter, localTailscale personalServerLocalTailscaleStatus) error {
 	client, ok := gate.cloudClient(token).(personalServerPreviewCloudClient)
 	if !ok {
 		return fmt.Errorf("Personal Server preview requires a Hetzner client that can list Locations, Server Types, and Pricing")
@@ -332,14 +354,6 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 	}
 	if !hasAnyEligiblePersonalServerType(serverTypes, locationChoices) {
 		return fmt.Errorf("no eligible Server Types are available in any Location")
-	}
-
-	pricing, err := client.Pricing(ctx)
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		pricing = personalServerPricing{}
 	}
 
 	defaultLocation := defaultPersonalServerLocationChoice(locationChoices)
@@ -366,7 +380,7 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 		fmt.Fprintf(out, "Selected Personal Server Location: %s\n", locationChoice.Location.Name)
 		fmt.Fprintf(out, "Selected Server Type: %s\n", serverTypeChoice.ServerType.Name)
 
-		inputs, err := gate.collectPersonalServerCreationInputs(prompter)
+		inputs, err := gate.collectPersonalServerCreationInputs(prompter, localTailscale.Identity)
 		if err != nil {
 			return err
 		}
@@ -378,8 +392,26 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			PasswordHash:      inputs.PasswordHash,
 			GitIdentity:       inputs.GitIdentity,
 			RemoteProjectRoot: cfg.Projects.RemoteRoot,
-			SSHIdentityFile:   cfg.SSH.IdentityFile,
+			TailscaleIdentity: localTailscale.Identity,
 		}
+		if gate.tailnetPolicyEnabled {
+			if createClient, ok := client.(personalServerCreateCloudClient); ok {
+				if err := gate.ensurePersonalServerNameAvailable(ctx, createClient, inputs.ServerName); err != nil {
+					return err
+				}
+			}
+			if err := gate.ensurePersonalServerTailscaleHostAvailable(ctx, gate.tailscaleDeviceClient(cfg.Auth.Tailscale), inputs.ServerName); err != nil {
+				return err
+			}
+		}
+		policyPlan, proceed, err := gate.prepareTailnetPolicyForPersonalServer(ctx, out, cfg.Auth.Tailscale, localTailscale.Identity, inputs.User, prompter)
+		if err != nil {
+			return err
+		}
+		if !proceed {
+			return nil
+		}
+		plan.TailnetPolicy = policyPlan
 		if createClient, ok := client.(personalServerCreateCloudClient); ok {
 			existingFirewall, err := personalServerFirewallExists(ctx, createClient)
 			if err != nil {
@@ -387,11 +419,6 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 			}
 			plan.ExistingFirewall = existingFirewall
 		}
-		plan.PrimaryIPv4MonthlyGrossEUR, _ = personalServerPrimaryIPMonthlyGrossText(
-			pricing,
-			string(hcloud.PrimaryIPTypeIPv4),
-			locationChoice.Location.Name,
-		)
 		writePersonalServerCreationPlan(out, plan)
 
 		create, err := prompter.Confirm("Create Personal Server?", false)
@@ -412,26 +439,19 @@ func (gate personalServerProvisioningGate) previewPersonalServerCreation(ctx con
 }
 
 func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Context, out io.Writer, appConfigPath string, cfg appConfig, client personalServerCreateCloudClient, plan personalServerCreationPlan) error {
-	if _, found, err := client.ServerByName(ctx, plan.ServerName); err != nil {
-		return fmt.Errorf("check for existing Personal Server name %q: %w", plan.ServerName, err)
-	} else if found {
-		return fmt.Errorf("Personal Server name %q already exists in Hetzner", plan.ServerName)
+	if err := gate.ensurePersonalServerNameAvailable(ctx, client, plan.ServerName); err != nil {
+		return err
 	}
-
-	identity, err := gate.loadPersonalServerSSHIdentity(plan.SSHIdentityFile)
-	if err != nil {
+	tailscaleDevices := gate.tailscaleDeviceClient(cfg.Auth.Tailscale)
+	if err := gate.ensurePersonalServerTailscaleHostAvailable(ctx, tailscaleDevices, plan.ServerName); err != nil {
 		return err
 	}
 
-	userData, err := renderPersonalServerBootstrapCloudInit(personalServerBootstrapInput{
-		User:              plan.User,
-		PasswordHash:      plan.PasswordHash,
-		SSHPublicKey:      identity.PublicKey.Line(),
-		RemoteProjectRoot: plan.RemoteProjectRoot,
-		GitIdentity:       plan.GitIdentity,
-		ToolPlan:          defaultPersonalServerBootstrapToolPlan(),
-	})
-	if err != nil {
+	if err := gate.applyTailnetPolicyForPersonalServer(ctx, cfg.Auth.Tailscale, personalServerTailnetPolicyInput{
+		Identity: plan.TailscaleIdentity,
+		User:     plan.User,
+		Tag:      personalServerTailscaleTag,
+	}, plan.TailnetPolicy); err != nil {
 		return err
 	}
 
@@ -445,7 +465,20 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		return err
 	}
 
-	sshKey, err := ensurePersonalServerSSHKey(ctx, client, identity)
+	machineAuthKey, err := gate.createPersonalServerTailscaleMachineAuthKey(ctx, cfg.Auth.Tailscale)
+	if err != nil {
+		return err
+	}
+
+	userData, err := gate.renderPersonalServerBootstrap(personalServerBootstrapInput{
+		User:                    plan.User,
+		PasswordHash:            plan.PasswordHash,
+		TailscaleHost:           plan.ServerName,
+		TailscaleMachineAuthKey: machineAuthKey.Key,
+		RemoteProjectRoot:       plan.RemoteProjectRoot,
+		GitIdentity:             plan.GitIdentity,
+		ToolPlan:                defaultPersonalServerBootstrapToolPlan(),
+	})
 	if err != nil {
 		return err
 	}
@@ -456,59 +489,74 @@ func (gate personalServerProvisioningGate) createPersonalServer(ctx context.Cont
 		ServerTypeName: plan.ServerType.Name,
 		ImageID:        image.ID,
 		ImageName:      image.Name,
-		SSHKeyID:       sshKey.ID,
 		FirewallID:     firewall.ID,
 		UserData:       userData,
-		Labels:         personalServerResourceLabels(),
-		EnableIPv4:     true,
+		Labels:         personalServerServerLabels(plan.ServerName),
+		EnableIPv4:     false,
 		EnableIPv6:     true,
 	})
 	if err != nil {
 		return fmt.Errorf("create Personal Server: %w", err)
 	}
 	if err := client.WaitActions(ctx, actions); err != nil {
-		if saveErr := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User); saveErr != nil {
+		if saveErr := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User, plan.ServerName); saveErr != nil {
 			return saveErr
 		}
 		return fmt.Errorf("wait for Personal Server create actions: %w", err)
 	}
 
-	if err := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User); err != nil {
+	if err := gate.savePersonalServerConfig(appConfigPath, cfg, server, plan.User, plan.ServerName); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "Personal Server created: server %d.\n", server.ID)
-	fmt.Fprintf(out, "Personal Server addresses: %s\n", formatPersonalServerAddresses(server.IPv4, server.IPv6))
+	fmt.Fprintf(out, "Personal Server Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintf(out, "Personal Server public IPv6 inventory: %s\n", displayPersonalServerAddress(server.IPv6))
 
-	marker, err := gate.waitForPersonalServerBootstrap(ctx, identity, plan.User, server)
+	if err := gate.waitForPersonalServerTailscaleAccess(ctx, out, tailscaleDevices, plan); err != nil {
+		fmt.Fprintf(out, "Personal Server Tailscale access failed: %v\n", err)
+		writePersonalServerInspectionHint(out, plan, server)
+		return err
+	}
+
+	fmt.Fprintln(out, "Waiting for Personal Server Bootstrap marker.")
+	marker, err := gate.waitForPersonalServerBootstrap(ctx, out, plan.User, plan.ServerName)
 	if err != nil {
 		fmt.Fprintf(out, "Personal Server bootstrap failed: %v\n", err)
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		return err
 	}
 	return writePersonalServerBootstrapReport(out, marker, plan, server)
 }
 
-func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPath string, cfg appConfig, server personalServerCloudServer, user string) error {
+func (gate personalServerProvisioningGate) savePersonalServerConfig(appConfigPath string, cfg appConfig, server personalServerCloudServer, user string, tailscaleHost string) error {
 	cfg.PersonalServer = personalServerConfig{
-		ServerID: server.ID,
-		User:     user,
-		IPv4:     server.IPv4,
-		IPv6:     server.IPv6,
+		ServerID:      server.ID,
+		User:          user,
+		TailscaleHost: tailscaleHost,
+		IPv6:          server.IPv6,
 	}
 	return gate.writeConfig(appConfigPath, cfg)
 }
 
+func (gate personalServerProvisioningGate) renderPersonalServerBootstrap(input personalServerBootstrapInput) (string, error) {
+	if gate.renderBootstrap != nil {
+		return gate.renderBootstrap(input)
+	}
+	return renderPersonalServerBootstrapCloudInit(input)
+}
+
 const (
 	personalServerFirewallName         = "myn-personal-server"
-	personalServerMoshUDPPortRange     = "60000-61000"
-	personalServerSSHKeyName           = "myn-personal-server"
 	personalServerBootstrapMarkerPath  = "/var/lib/myn/personal-server-bootstrap.json"
 	defaultPersonalServerBootstrapWait = 5 * time.Minute
+	defaultPersonalServerTailscaleWait = 8 * time.Minute
 	defaultPersonalServerSSHPollWait   = 5 * time.Second
 )
 
-type personalServerSSHRunner func(ctx context.Context, identityFile string, user string, host string, command string) (string, error)
+type personalServerSSHRunner func(ctx context.Context, user string, host string, command string) (string, error)
+
+type personalServerTailscaleSSHCheckRunner func(ctx context.Context, out io.Writer, user string, host string, command string) (string, error)
 
 type personalServerBootstrapMarker struct {
 	Status             string            `json:"status"`
@@ -520,73 +568,218 @@ type personalServerBootstrapMarker struct {
 	SkippedGitIdentity []string          `json:"skippedGitIdentity"`
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, identity sshIdentityCandidate, user string, server personalServerCloudServer) (personalServerBootstrapMarker, error) {
-	host := personalServerBootstrapHost(server)
+func (gate personalServerProvisioningGate) waitForPersonalServerBootstrap(ctx context.Context, out io.Writer, user string, host string) (personalServerBootstrapMarker, error) {
+	host = strings.TrimSpace(host)
 	if host == "" {
-		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no reachable public address")
+		return personalServerBootstrapMarker{}, fmt.Errorf("Personal Server has no saved Tailscale Host")
 	}
 
-	runner := gate.personalServerSSHRunner()
-	if err := gate.waitForPersonalServerRootSSH(ctx, runner, identity.IdentityPath, host); err != nil {
-		return personalServerBootstrapMarker{}, err
-	}
-
+	runner := gate.personalServerTailscaleSSHCheckRunner()
 	timeout := gate.personalServerBootstrapTimeout()
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	for {
-		for _, loginUser := range personalServerBootstrapMarkerUsers(user) {
-			output, err := runner(pollCtx, identity.IdentityPath, loginUser, host, "cat "+personalServerBootstrapMarkerPath)
-			if err == nil {
-				marker, parseErr := parsePersonalServerBootstrapMarker(output)
-				if parseErr == nil {
-					return marker, nil
-				}
-			}
-			if err := ctx.Err(); err != nil {
-				return personalServerBootstrapMarker{}, err
-			}
-			if pollCtx.Err() != nil {
-				return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
-			}
-		}
-
-		if err := ctx.Err(); err != nil {
-			return personalServerBootstrapMarker{}, err
+	output, err := runner(pollCtx, out, user, host, personalServerBootstrapMarkerPollCommand(gate.personalServerSSHPollInterval()))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return personalServerBootstrapMarker{}, ctxErr
 		}
 		if pollCtx.Err() != nil {
 			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
 		}
-		if err := gate.personalServerSleep(pollCtx, gate.personalServerSSHPollInterval()); err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return personalServerBootstrapMarker{}, ctxErr
-			}
-			return personalServerBootstrapMarker{}, fmt.Errorf("timed out waiting for Personal Server Bootstrap marker after %s", timeout)
-		}
+		return personalServerBootstrapMarker{}, err
 	}
+	return parsePersonalServerBootstrapMarker(output)
 }
 
-func personalServerBootstrapMarkerUsers(user string) []string {
-	user = strings.TrimSpace(user)
-	if user == "" || user == "root" {
-		return []string{"root"}
+func personalServerBootstrapMarkerPollCommand(interval time.Duration) string {
+	sleepSeconds := interval.Seconds()
+	if sleepSeconds <= 0 {
+		sleepSeconds = defaultPersonalServerSSHPollWait.Seconds()
 	}
-	return []string{"root", user}
+	return fmt.Sprintf(`python3 - %s %s <<'PY'
+import json
+import pathlib
+import sys
+import time
+
+marker_path = pathlib.Path(sys.argv[1])
+sleep_seconds = float(sys.argv[2])
+while True:
+    try:
+        marker = marker_path.read_text(encoding="utf-8")
+        payload = json.loads(marker)
+        if str(payload.get("status", "")).strip():
+            print(marker, end="" if marker.endswith("\n") else "\n")
+            raise SystemExit(0)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    time.sleep(sleep_seconds)
+PY`, shellQuote(personalServerBootstrapMarkerPath), shellQuote(strconv.FormatFloat(sleepSeconds, 'f', -1, 64)))
 }
 
-func (gate personalServerProvisioningGate) waitForPersonalServerRootSSH(ctx context.Context, runner personalServerSSHRunner, identityFile string, host string) error {
+func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleAccess(ctx context.Context, out io.Writer, client personalServerTailscaleDeviceClient, plan personalServerCreationPlan) error {
+	fmt.Fprintf(out, "Waiting for Tailscale device registration: %s\n", plan.ServerName)
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	accessCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if _, err := gate.waitForPersonalServerTailscaleDevice(accessCtx, client, plan.ServerName); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Waiting for Tailscale SSH reachability: %s@%s\n", plan.User, plan.ServerName)
+	return gate.waitForPersonalServerSSHReachability(accessCtx, out, plan.User, plan.ServerName)
+}
+
+func (gate personalServerProvisioningGate) waitForPersonalServerTailscaleDevice(ctx context.Context, client personalServerTailscaleDeviceClient, host string) (personalServerTailscaleDevice, error) {
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	waitingFor := fmt.Sprintf("Tailscale device registration for host %q", host)
 	for {
-		if _, err := runner(ctx, identityFile, "root", host, "true"); err == nil {
-			return nil
+		device, found, err := gate.findPersonalServerTailscaleDevice(ctx, client, host)
+		if err != nil {
+			return personalServerTailscaleDevice{}, fmt.Errorf("list Tailscale devices: %w", err)
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if found {
+			if err := personalServerTailscaleDeviceReadyError(device, host); err == nil {
+				return device, nil
+			} else {
+				waitingFor = err.Error()
+			}
+		}
+
+		if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+			return personalServerTailscaleDevice{}, waitErr
 		}
 		if err := gate.personalServerSleep(ctx, gate.personalServerSSHPollInterval()); err != nil {
+			if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+				return personalServerTailscaleDevice{}, waitErr
+			}
+			return personalServerTailscaleDevice{}, err
+		}
+	}
+}
+
+func (gate personalServerProvisioningGate) waitForPersonalServerSSHReachability(ctx context.Context, out io.Writer, user string, host string) error {
+	runner := gate.personalServerTailscaleSSHCheckRunner()
+	timeout := gate.personalServerTailscaleAccessTimeout()
+	waitingFor := fmt.Sprintf("Tailscale SSH reachability to %s@%s", strings.TrimSpace(user), strings.TrimSpace(host))
+	lastFailure := ""
+	for {
+		if _, err := runner(ctx, out, user, host, "true"); err == nil {
+			return nil
+		} else {
+			writePersonalServerSSHReachabilityFailure(out, err, &lastFailure)
+		}
+		if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+			return waitErr
+		}
+		if err := gate.personalServerSleep(ctx, gate.personalServerSSHPollInterval()); err != nil {
+			if waitErr := personalServerTimeoutOrContextError(ctx, waitingFor, timeout); waitErr != nil {
+				return waitErr
+			}
 			return err
 		}
 	}
+}
+
+func writePersonalServerSSHReachabilityFailure(out io.Writer, err error, lastFailure *string) {
+	if err == nil {
+		return
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" || message == *lastFailure {
+		return
+	}
+	fmt.Fprintf(out, "Tailscale SSH is not ready yet: %s\n", message)
+	*lastFailure = message
+}
+
+func personalServerTimeoutOrContextError(ctx context.Context, waitingFor string, timeout time.Duration) error {
+	err := ctx.Err()
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("timed out waiting for %s after %s", waitingFor, timeout)
+	}
+	return err
+}
+
+func (gate personalServerProvisioningGate) ensurePersonalServerNameAvailable(ctx context.Context, client personalServerCreateCloudClient, name string) error {
+	if _, found, err := client.ServerByName(ctx, name); err != nil {
+		return fmt.Errorf("check for existing Personal Server name %q: %w", name, err)
+	} else if found {
+		return fmt.Errorf("Personal Server name %q already exists in Hetzner", name)
+	}
+	return nil
+}
+
+func (gate personalServerProvisioningGate) ensurePersonalServerTailscaleHostAvailable(ctx context.Context, client personalServerTailscaleDeviceClient, host string) error {
+	if _, found, err := gate.findPersonalServerTailscaleDevice(ctx, client, host); err != nil {
+		return fmt.Errorf("check for existing Tailscale Host %q: %w", host, err)
+	} else if found {
+		return fmt.Errorf("Tailscale Host %q already exists in saved tailnet", host)
+	}
+	return nil
+}
+
+func (gate personalServerProvisioningGate) findPersonalServerTailscaleDevice(ctx context.Context, client personalServerTailscaleDeviceClient, host string) (personalServerTailscaleDevice, bool, error) {
+	devices, err := client.Devices(ctx)
+	if err != nil {
+		return personalServerTailscaleDevice{}, false, err
+	}
+	for _, device := range devices {
+		if personalServerTailscaleDeviceMatchesHost(device, host) {
+			return device, true, nil
+		}
+	}
+	return personalServerTailscaleDevice{}, false, nil
+}
+
+func personalServerTailscaleDeviceReadyError(device personalServerTailscaleDevice, host string) error {
+	if !personalServerTailscaleDeviceHasTag(device, personalServerTailscaleTag) {
+		return fmt.Errorf("Tailscale device %q to have tag %q", host, personalServerTailscaleTag)
+	}
+	if !device.Authorized {
+		return fmt.Errorf("Tailscale device %q to become authorized", host)
+	}
+	if !device.ConnectedToControl {
+		return fmt.Errorf("Tailscale device %q to come online", host)
+	}
+	return nil
+}
+
+func personalServerTailscaleDeviceHasTag(device personalServerTailscaleDevice, tag string) bool {
+	want := strings.TrimSpace(tag)
+	for _, candidate := range device.Tags {
+		if strings.TrimSpace(candidate) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func personalServerTailscaleDeviceMatchesHost(device personalServerTailscaleDevice, host string) bool {
+	want := normalizePersonalServerTailnet(host)
+	if want == "" {
+		return false
+	}
+	for _, candidate := range []string{device.Hostname, device.Name} {
+		candidate = normalizePersonalServerTailnet(candidate)
+		if candidate == want {
+			return true
+		}
+		if firstLabel, _, ok := strings.Cut(candidate, "."); ok && firstLabel == want {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePersonalServerBootstrapMarker(output string) (personalServerBootstrapMarker, error) {
@@ -610,8 +803,7 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 		fmt.Fprintf(out, "Reboot required: %t\n", marker.RebootRequired)
 		writePersonalServerToolVersions(out, marker.ToolVersions)
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
-		writePersonalServerUserSSHCommands(out, plan, server)
-		writePersonalServerMoshCommands(out, plan, server)
+		writePersonalServerConnectionHint(out, plan)
 		return nil
 	case "failed":
 		fmt.Fprintln(out, "Personal Server bootstrap failed.")
@@ -619,15 +811,25 @@ func writePersonalServerBootstrapReport(out io.Writer, marker personalServerBoot
 			fmt.Fprintf(out, "Bootstrap failure: %s\n", marker.Failure)
 		}
 		writePersonalServerPartialFailures(out, marker.PartialFailures)
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		if strings.TrimSpace(marker.Failure) != "" {
 			return fmt.Errorf("Personal Server Bootstrap failed: %s", marker.Failure)
 		}
 		return fmt.Errorf("Personal Server Bootstrap failed")
 	default:
-		writePersonalServerSSHCommands(out, plan, server)
+		writePersonalServerInspectionHint(out, plan, server)
 		return fmt.Errorf("Personal Server Bootstrap marker has unknown status %q", marker.Status)
 	}
+}
+
+func writePersonalServerConnectionHint(out io.Writer, plan personalServerCreationPlan) {
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintln(out, "Connect with: myn connect")
+}
+
+func writePersonalServerInspectionHint(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
+	fmt.Fprintf(out, "Public IPv6 inventory: %s\n", displayPersonalServerAddress(server.IPv6))
 }
 
 func writePersonalServerToolVersions(out io.Writer, versions map[string]string) {
@@ -662,48 +864,6 @@ func writePersonalServerPartialFailures(out io.Writer, failures []string) {
 	}
 }
 
-func writePersonalServerSSHCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "SSH commands:")
-	writePersonalServerSSHCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerSSHCommand(out, "root IPv4", plan.SSHIdentityFile, "root", server.IPv4)
-	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-	writePersonalServerSSHCommand(out, "root IPv6", plan.SSHIdentityFile, "root", server.IPv6)
-}
-
-func writePersonalServerUserSSHCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "SSH commands:")
-	writePersonalServerSSHCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerSSHCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-}
-
-func writePersonalServerSSHCommand(out io.Writer, label string, identityFile string, user string, host string) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		fmt.Fprintf(out, "- %s: unavailable\n", label)
-		return
-	}
-	fmt.Fprintf(out, "- %s: %s\n", label, personalServerSSHCommandText("~/"+identityFile, user, host))
-}
-
-func writePersonalServerMoshCommands(out io.Writer, plan personalServerCreationPlan, server personalServerCloudServer) {
-	fmt.Fprintln(out, "Mosh commands:")
-	writePersonalServerMoshCommand(out, "user IPv4", plan.SSHIdentityFile, plan.User, server.IPv4)
-	writePersonalServerMoshCommand(out, "user IPv6", plan.SSHIdentityFile, plan.User, server.IPv6)
-}
-
-func writePersonalServerMoshCommand(out io.Writer, label string, identityFile string, user string, host string) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		fmt.Fprintf(out, "- %s: unavailable\n", label)
-		return
-	}
-	fmt.Fprintf(out, "- %s: mosh --ssh=\"ssh -o IdentitiesOnly=yes -i ~/%s\" %s@%s\n", label, identityFile, user, host)
-}
-
-func personalServerBootstrapHost(server personalServerCloudServer) string {
-	return personalServerSSHHost(server.IPv4, server.IPv6)
-}
-
 func (gate personalServerProvisioningGate) personalServerSSHRunner() personalServerSSHRunner {
 	if gate.runSSH != nil {
 		return gate.runSSH
@@ -711,19 +871,91 @@ func (gate personalServerProvisioningGate) personalServerSSHRunner() personalSer
 	return defaultPersonalServerSSHRunner
 }
 
-func defaultPersonalServerSSHRunner(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-	args := personalServerSSHCommandArgs(identityFile, user, host,
-		"-o", "BatchMode=yes",
+func (gate personalServerProvisioningGate) personalServerTailscaleSSHCheckRunner() personalServerTailscaleSSHCheckRunner {
+	if gate.runTailscaleSSHCheck != nil {
+		return gate.runTailscaleSSHCheck
+	}
+	if gate.runSSH != nil {
+		return func(ctx context.Context, _ io.Writer, user string, host string, command string) (string, error) {
+			output, err := gate.runSSH(ctx, user, host, command)
+			if err == nil {
+				return output, nil
+			}
+			if strings.TrimSpace(output) != "" {
+				return output, commandOutputError("ssh", []byte(output), err)
+			}
+			return output, err
+		}
+	}
+	return defaultPersonalServerTailscaleSSHCheckRunner
+}
+
+func defaultPersonalServerSSHRunner(ctx context.Context, user string, host string, command string) (string, error) {
+	options := []string{
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
-	)
+	}
+	args := personalServerSSHCommandArgs(user, host, options...)
 	args = append(args, command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", commandOutputError("ssh", output, err)
+	return runPersonalServerSSHCommand(cmd)
+}
+
+func runPersonalServerSSHCommand(cmd *exec.Cmd) (string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", commandOutputError("ssh", combinedCommandOutput(stdout.Bytes(), stderr.Bytes()), err)
 	}
-	return string(output), nil
+	return stdout.String(), nil
+}
+
+func combinedCommandOutput(stdout []byte, stderr []byte) []byte {
+	stdout = bytes.TrimSpace(stdout)
+	stderr = bytes.TrimSpace(stderr)
+	switch {
+	case len(stdout) == 0:
+		return stderr
+	case len(stderr) == 0:
+		return stdout
+	default:
+		output := make([]byte, 0, len(stdout)+1+len(stderr))
+		output = append(output, stdout...)
+		output = append(output, '\n')
+		output = append(output, stderr...)
+		return output
+	}
+}
+
+func defaultPersonalServerTailscaleSSHCheckRunner(ctx context.Context, out io.Writer, user string, host string, command string) (string, error) {
+	if out == nil {
+		out = io.Discard
+	}
+	options := []string{
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10",
+	}
+	args := personalServerSSHCommandArgs(user, host, options...)
+	args = append(args, command)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	return runPersonalServerTailscaleSSHCommand(cmd, out)
+}
+
+func runPersonalServerTailscaleSSHCommand(cmd *exec.Cmd, stderrOut io.Writer) (string, error) {
+	if stderrOut == nil {
+		stderrOut = io.Discard
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.MultiWriter(&stderr, stderrOut)
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), commandOutputError("ssh", combinedCommandOutput(stdout.Bytes(), stderr.Bytes()), err)
+	}
+	return stdout.String(), nil
 }
 
 func (gate personalServerProvisioningGate) personalServerBootstrapTimeout() time.Duration {
@@ -731,6 +963,13 @@ func (gate personalServerProvisioningGate) personalServerBootstrapTimeout() time
 		return gate.bootstrapTimeout
 	}
 	return defaultPersonalServerBootstrapWait
+}
+
+func (gate personalServerProvisioningGate) personalServerTailscaleAccessTimeout() time.Duration {
+	if gate.tailscaleAccessTimeout > 0 {
+		return gate.tailscaleAccessTimeout
+	}
+	return defaultPersonalServerTailscaleWait
 }
 
 func (gate personalServerProvisioningGate) personalServerSSHPollInterval() time.Duration {
@@ -860,16 +1099,26 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 		return personalServerFirewall{}, fmt.Errorf("find Personal Server Firewall: %w", err)
 	}
 	if found {
+		if !personalServerFirewallIsMynManaged(firewall) {
+			return personalServerFirewall{}, fmt.Errorf("existing Personal Server Firewall %q is not Myn-managed; rename it or remove it before provisioning", personalServerFirewallName)
+		}
+		if len(firewall.Rules) == 0 {
+			return firewall, nil
+		}
+		actions, err := client.SetFirewallRules(ctx, firewall, nil)
+		if err != nil {
+			return personalServerFirewall{}, fmt.Errorf("reconcile Personal Server Firewall rules: %w", err)
+		}
+		if err := client.WaitActions(ctx, actions); err != nil {
+			return personalServerFirewall{}, fmt.Errorf("wait for Personal Server Firewall rule reconciliation actions: %w", err)
+		}
+		firewall.Rules = nil
 		return firewall, nil
 	}
 
 	firewall, actions, err := client.CreateFirewall(ctx, personalServerFirewall{
 		Name:   personalServerFirewallName,
 		Labels: personalServerResourceLabels(),
-		Rules: []personalServerFirewallRule{
-			{Direction: "in", Protocol: "tcp", Port: "22", SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-			{Direction: "in", Protocol: "udp", Port: personalServerMoshUDPPortRange, SourceIPs: []string{"0.0.0.0/0", "::/0"}},
-		},
 	})
 	if err != nil {
 		return personalServerFirewall{}, fmt.Errorf("create Personal Server Firewall: %w", err)
@@ -881,45 +1130,19 @@ func ensurePersonalServerFirewall(ctx context.Context, client personalServerCrea
 }
 
 func personalServerFirewallExists(ctx context.Context, client personalServerCreateCloudClient) (bool, error) {
-	_, found, err := client.FirewallByName(ctx, personalServerFirewallName)
+	firewall, found, err := client.FirewallByName(ctx, personalServerFirewallName)
 	if err != nil {
 		return false, fmt.Errorf("find Personal Server Firewall: %w", err)
+	}
+	if found && !personalServerFirewallIsMynManaged(firewall) {
+		return false, fmt.Errorf("existing Personal Server Firewall %q is not Myn-managed; rename it or remove it before provisioning", personalServerFirewallName)
 	}
 	return found, nil
 }
 
-func ensurePersonalServerSSHKey(ctx context.Context, client personalServerCreateCloudClient, identity sshIdentityCandidate) (personalServerSSHKey, error) {
-	fingerprint, err := sshPublicKeyHetznerFingerprint(identity.PublicKey)
-	if err != nil {
-		return personalServerSSHKey{}, err
-	}
-
-	sshKey, found, err := client.SSHKeyByFingerprint(ctx, fingerprint)
-	if err != nil {
-		return personalServerSSHKey{}, fmt.Errorf("find Personal Server SSH Key: %w", err)
-	}
-	if found {
-		return sshKey, nil
-	}
-
-	sshKey, err = client.CreateSSHKey(ctx, personalServerSSHKey{
-		Name:        personalServerSSHKeyNameForFingerprint(fingerprint),
-		Fingerprint: fingerprint,
-		PublicKey:   identity.PublicKey.Line(),
-		Labels:      personalServerResourceLabels(),
-	})
-	if err != nil {
-		return personalServerSSHKey{}, fmt.Errorf("create Personal Server SSH Key: %w", err)
-	}
-	return sshKey, nil
-}
-
-func personalServerSSHKeyNameForFingerprint(fingerprint string) string {
-	fingerprint = strings.ReplaceAll(strings.TrimSpace(fingerprint), ":", "")
-	if fingerprint == "" {
-		return personalServerSSHKeyName
-	}
-	return personalServerSSHKeyName + "-" + fingerprint
+func personalServerFirewallIsMynManaged(firewall personalServerFirewall) bool {
+	labels := firewall.Labels
+	return labels["managed_by"] == "myn" && labels["role"] == "personal_server"
 }
 
 func personalServerResourceLabels() map[string]string {
@@ -929,27 +1152,19 @@ func personalServerResourceLabels() map[string]string {
 	}
 }
 
-func (gate personalServerProvisioningGate) loadPersonalServerSSHIdentity(identityFile string) (sshIdentityCandidate, error) {
-	home, err := gate.personalServerUserHomeDir()
-	if err != nil {
-		return sshIdentityCandidate{}, fmt.Errorf("find user home directory: %w", err)
+func personalServerServerLabels(tailscaleHost string) map[string]string {
+	labels := personalServerResourceLabels()
+	if host := strings.TrimSpace(tailscaleHost); host != "" {
+		labels["tailscale_host"] = host
 	}
-
-	candidate, err := loadSSHIdentity(identityFile, home, configureDeps{
-		stat:         gate.personalServerStat(),
-		readFile:     gate.personalServerReadFile(),
-		writeFile:    gate.personalServerWriteFile(),
-		chmod:        gate.personalServerChmod(),
-		sshPublicKey: gate.personalServerSSHPublicKey(),
-	})
-	if err != nil {
-		return sshIdentityCandidate{}, fmt.Errorf("load configured SSH identity for Personal Server: %w", err)
-	}
-	return candidate, nil
+	return labels
 }
 
-func (gate personalServerProvisioningGate) collectPersonalServerCreationInputs(prompter configurePrompter) (personalServerCreationInputs, error) {
-	defaultUser := normalizePersonalServerUser(gate.personalServerCurrentUsername())
+func (gate personalServerProvisioningGate) collectPersonalServerCreationInputs(prompter configurePrompter, defaultIdentity string) (personalServerCreationInputs, error) {
+	if strings.TrimSpace(defaultIdentity) == "" {
+		defaultIdentity = gate.personalServerCurrentUsername()
+	}
+	defaultUser := normalizePersonalServerUser(defaultIdentity)
 	user, err := prompter.Input("Personal Server User", defaultUser, validatePersonalServerUser)
 	if err != nil {
 		return personalServerCreationInputs{}, err
@@ -1103,47 +1318,6 @@ func (gate personalServerProvisioningGate) personalServerUserHomeDir() (string, 
 	return os.UserHomeDir()
 }
 
-func (gate personalServerProvisioningGate) personalServerStat() func(string) (os.FileInfo, error) {
-	if gate.stat != nil {
-		return gate.stat
-	}
-	return os.Stat
-}
-
-func (gate personalServerProvisioningGate) personalServerReadFile() func(string) ([]byte, error) {
-	if gate.readFile != nil {
-		return gate.readFile
-	}
-	return os.ReadFile
-}
-
-func (gate personalServerProvisioningGate) personalServerWriteFile() func(string, []byte, os.FileMode) error {
-	if gate.writeFile != nil {
-		return gate.writeFile
-	}
-	return os.WriteFile
-}
-
-func (gate personalServerProvisioningGate) personalServerChmod() func(string, os.FileMode) error {
-	if gate.chmod != nil {
-		return gate.chmod
-	}
-	return os.Chmod
-}
-
-func (gate personalServerProvisioningGate) personalServerSSHPublicKey() func(string) (string, error) {
-	if gate.sshPublicKey != nil {
-		return gate.sshPublicKey
-	}
-	return func(identityPath string) (string, error) {
-		output, err := exec.Command("ssh-keygen", "-y", "-f", identityPath).CombinedOutput()
-		if err != nil {
-			return "", commandOutputError("ssh-keygen -y", output, err)
-		}
-		return string(output), nil
-	}
-}
-
 func hashPersonalServerPassword(password string, saltReader io.Reader) (string, error) {
 	if password == "" {
 		return "", fmt.Errorf("Personal Server User password is required")
@@ -1229,19 +1403,20 @@ func writePersonalServerCreationPlan(out io.Writer, plan personalServerCreationP
 	fmt.Fprintf(out, "Server name: %s\n", plan.ServerName)
 	fmt.Fprintf(out, "Personal Server User: %s\n", plan.User)
 	fmt.Fprintln(out, "SSH and network:")
-	fmt.Fprintf(out, "SSH key: ~/%s\n", plan.SSHIdentityFile)
 	if plan.ExistingFirewall {
-		fmt.Fprintf(out, "Firewall: %s (existing rules reused unchanged; Mosh may require inbound UDP %s)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+		fmt.Fprintf(out, "Firewall: %s (existing Myn-managed firewall reconciled to no public inbound rules)\n", personalServerFirewallName)
 	} else {
-		fmt.Fprintf(out, "Firewall: %s (inbound SSH and Mosh UDP %s over IPv4 and IPv6)\n", personalServerFirewallName, personalServerMoshUDPPortRange)
+		fmt.Fprintf(out, "Firewall: %s (no public inbound rules)\n", personalServerFirewallName)
 	}
-	fmt.Fprintln(out, "Public network: IPv4 and IPv6 enabled")
+	fmt.Fprintln(out, "Public network: IPv4 disabled, IPv6 enabled for inventory and outbound bootstrap")
+	fmt.Fprintf(out, "Tailscale Host: %s\n", plan.ServerName)
+	writePersonalServerTailnetPolicySummary(out, plan.TailnetPolicy)
 	fmt.Fprintf(out, "Remote project root: ~/%s\n", plan.RemoteProjectRoot)
 	fmt.Fprintln(out, "Install plan:")
 	fmt.Fprintln(out, "System services:")
 	fmt.Fprintln(out, "- security updates and unattended security upgrades")
-	fmt.Fprintln(out, "- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)")
-	fmt.Fprintln(out, "- Mosh Access")
+	fmt.Fprintln(out, "- Tailscale install, tailnet join, and Tailscale SSH Access")
+	fmt.Fprintln(out, "- system OpenSSH disabled after Tailscale SSH is enabled")
 	fmt.Fprintln(out, "- Docker Engine and Docker Compose")
 	fmt.Fprintln(out, "- Personal Server User in docker group (root-equivalent access)")
 	fmt.Fprintln(out, "- Homebrew")
@@ -1449,12 +1624,7 @@ func personalServerCreationPlanMonthlyGrossText(plan personalServerCreationPlan)
 		return "", false
 	}
 
-	primaryIPv4Price, ok := parsePersonalServerMonthlyGrossEUR(plan.PrimaryIPv4MonthlyGrossEUR)
-	if !ok {
-		return "", false
-	}
-
-	return formatPersonalServerMonthlyGrossEUR(serverPrice + primaryIPv4Price), true
+	return formatPersonalServerMonthlyGrossEUR(serverPrice), true
 }
 
 func personalServerPrimaryIPMonthlyGrossText(pricing personalServerPricing, ipType string, locationName string) (string, bool) {
@@ -1507,14 +1677,18 @@ func (gate personalServerProvisioningGate) cloudClient(token string) personalSer
 	return newHcloudPersonalServerCloudClient(token, os.Getenv("HCLOUD_ENDPOINT"))
 }
 
-func formatPersonalServerAddresses(ipv4 string, ipv6 string) string {
-	return fmt.Sprintf("IPv4 %s, IPv6 %s", displayPersonalServerAddress(ipv4), displayPersonalServerAddress(ipv6))
-}
-
 func displayPersonalServerAddress(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "unavailable"
+	}
+	return value
+}
+
+func displayPersonalServerName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "name unavailable"
 	}
 	return value
 }
@@ -1713,35 +1887,25 @@ func (client hcloudPersonalServerCloudClient) CreateFirewall(ctx context.Context
 	return personalServerFirewallFromHcloud(result.Firewall), personalServerActionsFromHcloud(result.Actions), nil
 }
 
-func (client hcloudPersonalServerCloudClient) SSHKeyByFingerprint(ctx context.Context, fingerprint string) (personalServerSSHKey, bool, error) {
-	sshKey, _, err := client.client.SSHKey.GetByFingerprint(ctx, fingerprint)
+func (client hcloudPersonalServerCloudClient) SetFirewallRules(ctx context.Context, firewall personalServerFirewall, rules []personalServerFirewallRule) ([]personalServerAction, error) {
+	hcloudRules, err := hcloudFirewallRules(rules)
 	if err != nil {
-		return personalServerSSHKey{}, false, err
+		return nil, err
 	}
-	if sshKey == nil {
-		return personalServerSSHKey{}, false, nil
-	}
-	return personalServerSSHKeyFromHcloud(sshKey), true, nil
-}
-
-func (client hcloudPersonalServerCloudClient) CreateSSHKey(ctx context.Context, sshKey personalServerSSHKey) (personalServerSSHKey, error) {
-	created, _, err := client.client.SSHKey.Create(ctx, hcloud.SSHKeyCreateOpts{
-		Name:      sshKey.Name,
-		PublicKey: sshKey.PublicKey,
-		Labels:    sshKey.Labels,
+	actions, _, err := client.client.Firewall.SetRules(ctx, &hcloud.Firewall{ID: int64(firewall.ID)}, hcloud.FirewallSetRulesOpts{
+		Rules: hcloudRules,
 	})
 	if err != nil {
-		return personalServerSSHKey{}, err
+		return nil, err
 	}
-	return personalServerSSHKeyFromHcloud(created), nil
+	return personalServerActionsFromHcloud(actions), nil
 }
 
 func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, request personalServerCreateServerRequest) (personalServerCloudServer, []personalServerAction, error) {
-	result, _, err := client.client.Server.Create(ctx, hcloud.ServerCreateOpts{
+	opts := hcloud.ServerCreateOpts{
 		Name:       request.Name,
 		ServerType: &hcloud.ServerType{Name: request.ServerTypeName},
 		Image:      &hcloud.Image{ID: int64(request.ImageID), Name: request.ImageName},
-		SSHKeys:    []*hcloud.SSHKey{{ID: int64(request.SSHKeyID)}},
 		Location:   &hcloud.Location{Name: request.LocationName},
 		UserData:   request.UserData,
 		Labels:     request.Labels,
@@ -1752,7 +1916,9 @@ func (client hcloudPersonalServerCloudClient) CreateServer(ctx context.Context, 
 			EnableIPv4: request.EnableIPv4,
 			EnableIPv6: request.EnableIPv6,
 		},
-	})
+	}
+
+	result, _, err := client.client.Server.Create(ctx, opts)
 	if err != nil {
 		return personalServerCloudServer{}, nil, err
 	}
@@ -1822,19 +1988,6 @@ func personalServerFirewallFromHcloud(firewall *hcloud.Firewall) personalServerF
 		})
 	}
 	return result
-}
-
-func personalServerSSHKeyFromHcloud(sshKey *hcloud.SSHKey) personalServerSSHKey {
-	if sshKey == nil {
-		return personalServerSSHKey{}
-	}
-	return personalServerSSHKey{
-		ID:          int(sshKey.ID),
-		Name:        sshKey.Name,
-		Fingerprint: sshKey.Fingerprint,
-		PublicKey:   sshKey.PublicKey,
-		Labels:      copyPersonalServerLabels(sshKey.Labels),
-	}
 }
 
 func personalServerActionsFromHcloud(actions []*hcloud.Action) []personalServerAction {

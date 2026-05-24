@@ -17,11 +17,17 @@ type appConfig struct {
 }
 
 type authConfig struct {
-	Hetzner hetznerConfig `json:"hetzner,omitempty"`
+	Hetzner   hetznerConfig   `json:"hetzner,omitempty"`
+	Tailscale tailscaleConfig `json:"tailscale,omitempty"`
 }
 
 type hetznerConfig struct {
 	Token string `json:"token,omitempty"`
+}
+
+type tailscaleConfig struct {
+	Token   string `json:"token,omitempty"`
+	Tailnet string `json:"tailnet,omitempty"`
 }
 
 type projectsConfig struct {
@@ -34,10 +40,11 @@ type sshConfig struct {
 }
 
 type personalServerConfig struct {
-	ServerID int    `json:"serverID,omitempty"`
-	User     string `json:"user,omitempty"`
-	IPv4     string `json:"ipv4,omitempty"`
-	IPv6     string `json:"ipv6,omitempty"`
+	ServerID      int    `json:"serverID,omitempty"`
+	User          string `json:"user,omitempty"`
+	TailscaleHost string `json:"tailscaleHost,omitempty"`
+	IPv4          string `json:"ipv4,omitempty"`
+	IPv6          string `json:"ipv6,omitempty"`
 }
 
 type personalServerConnectionConfigState int
@@ -45,7 +52,8 @@ type personalServerConnectionConfigState int
 const (
 	personalServerConnectionConfigAbsent personalServerConnectionConfigState = iota
 	personalServerConnectionConfigIncomplete
-	personalServerConnectionConfigMissingAddress
+	personalServerConnectionConfigMissingTailscaleHost
+	personalServerConnectionConfigLegacyPublicSSH
 	personalServerConnectionConfigReady
 )
 
@@ -80,11 +88,19 @@ func (cfg appConfig) MarshalJSON() ([]byte, error) {
 }
 
 func (cfg authConfig) isZero() bool {
-	return cfg.Hetzner.isZero()
+	return cfg.Hetzner.isZero() && cfg.Tailscale.isZero()
 }
 
 func (cfg hetznerConfig) isZero() bool {
 	return cfg.Token == ""
+}
+
+func (cfg tailscaleConfig) isZero() bool {
+	return cfg.Token == "" && cfg.Tailnet == ""
+}
+
+func (cfg tailscaleConfig) isConfigured() bool {
+	return strings.TrimSpace(cfg.Token) != "" && strings.TrimSpace(cfg.Tailnet) != ""
 }
 
 func (cfg projectsConfig) isZero() bool {
@@ -96,20 +112,23 @@ func (cfg sshConfig) isZero() bool {
 }
 
 func (cfg personalServerConfig) isZero() bool {
-	return cfg.ServerID == 0 && cfg.User == "" && cfg.IPv4 == "" && cfg.IPv6 == ""
+	return cfg.ServerID == 0 && cfg.User == "" && cfg.TailscaleHost == "" && cfg.IPv4 == "" && cfg.IPv6 == ""
 }
 
-func (cfg personalServerConfig) connectionConfigState() (personalServerConnectionConfigState, personalServerConnectionConfig) {
+func (cfg personalServerConfig) tailscaleConnectionConfigState() (personalServerConnectionConfigState, personalServerConnectionConfig) {
 	if cfg.isZero() {
 		return personalServerConnectionConfigAbsent, personalServerConnectionConfig{}
 	}
 	user := strings.TrimSpace(cfg.User)
-	if cfg.ServerID == 0 || user == "" {
+	if user == "" {
 		return personalServerConnectionConfigIncomplete, personalServerConnectionConfig{}
 	}
-	host := personalServerSSHHost(cfg.IPv4, cfg.IPv6)
+	host := strings.TrimSpace(cfg.TailscaleHost)
 	if host == "" {
-		return personalServerConnectionConfigMissingAddress, personalServerConnectionConfig{}
+		if strings.TrimSpace(cfg.IPv4) != "" || strings.TrimSpace(cfg.IPv6) != "" {
+			return personalServerConnectionConfigLegacyPublicSSH, personalServerConnectionConfig{}
+		}
+		return personalServerConnectionConfigMissingTailscaleHost, personalServerConnectionConfig{}
 	}
 	return personalServerConnectionConfigReady, personalServerConnectionConfig{
 		User: user,
@@ -121,8 +140,10 @@ func (state personalServerConnectionConfigState) validationError() error {
 	switch state {
 	case personalServerConnectionConfigAbsent, personalServerConnectionConfigIncomplete:
 		return fmt.Errorf("Personal Server Configuration is incomplete; run `myn configure`")
-	case personalServerConnectionConfigMissingAddress:
-		return fmt.Errorf("Personal Server Configuration is missing a saved Personal Server address; run `myn configure`")
+	case personalServerConnectionConfigMissingTailscaleHost:
+		return fmt.Errorf("Personal Server Configuration is missing a saved Tailscale Host; run `myn configure`")
+	case personalServerConnectionConfigLegacyPublicSSH:
+		return fmt.Errorf("legacy public-SSH Personal Server Configuration is no longer supported; recreate the Personal Server with Tailscale-only provisioning")
 	default:
 		return nil
 	}
