@@ -298,6 +298,9 @@ func (gate personalServerProvisioningGate) verifyConfiguredPersonalServer(ctx co
 	}
 
 	tailscaleHost := strings.TrimSpace(cfg.PersonalServer.TailscaleHost)
+	if !cfg.Auth.Tailscale.isConfigured() {
+		return fmt.Errorf("Tailscale Credentials are not configured; run `myn auth tailscale` first")
+	}
 	if _, found, err := gate.findPersonalServerTailscaleDevice(ctx, gate.tailscaleDeviceClient(cfg.Auth.Tailscale), tailscaleHost); err != nil {
 		return fmt.Errorf("verify Tailscale Host %q in saved tailnet: %w", tailscaleHost, err)
 	} else if !found {

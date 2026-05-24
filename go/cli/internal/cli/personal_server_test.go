@@ -187,6 +187,76 @@ func TestRunConfigureFailsWhenExistingPersonalServerTailscaleDeviceIsMissing(t *
 	}
 }
 
+func TestRunConfigureFailsWhenExistingPersonalServerNeedsMissingTailscaleCredentials(t *testing.T) {
+	home := t.TempDir()
+	mkdirAll(t, filepath.Join(home, "projects"))
+	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	if err := saveAppConfig(configPath, appConfig{
+		Auth: authConfig{
+			Hetzner: hetznerConfig{Token: "existing-token"},
+		},
+		PersonalServer: personalServerConfig{
+			ServerID:      123456,
+			User:          "harish",
+			TailscaleHost: "harish-personal-server",
+			IPv6:          "2001:db8::1",
+		},
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cloud := &fakePersonalServerCloudClient{
+		servers: map[int]personalServerCloudServer{
+			123456: {
+				ID:   123456,
+				Name: "harish-personal-server",
+				IPv6: "2001:db8::24",
+			},
+		},
+	}
+	devices := &fakePersonalServerTailscaleDeviceClient{
+		devices: [][]personalServerTailscaleDevice{
+			{{Hostname: "harish-personal-server"}},
+		},
+	}
+
+	var out bytes.Buffer
+	err := runConfigure(&out, configureOptions{
+		localRoot:     "projects",
+		localRootSet:  true,
+		remoteRoot:    "projects",
+		remoteRootSet: true,
+	}, configureDeps{
+		appConfigPath: func() (string, error) {
+			return configPath, nil
+		},
+		userHomeDir: func() (string, error) {
+			return home, nil
+		},
+		prompter: &fakeConfigurePrompter{canPrompt: true},
+		personalServerProvisioner: personalServerProvisioningGate{
+			newCloudClient: func(string) personalServerCloudClient {
+				return cloud
+			},
+			newTailscaleDeviceClient: func(tailscaleConfig) personalServerTailscaleDeviceClient {
+				return devices
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing Tailscale Credentials error")
+	}
+	if !strings.Contains(err.Error(), "Tailscale Credentials are not configured; run `myn auth tailscale` first") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if devices.listCalls != 0 {
+		t.Fatalf("missing Tailscale Credentials should stop before device lookup, got %d calls", devices.listCalls)
+	}
+	if strings.Contains(out.String(), "Personal Server provisioning prerequisites are ready.") {
+		t.Fatalf("missing Tailscale Credentials should not enter creation path, got %q", out.String())
+	}
+}
+
 func TestRunConfigureFailsForLegacyPublicSSHPersonalServerConfiguration(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))

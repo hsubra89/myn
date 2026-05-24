@@ -221,3 +221,12 @@
 - Changed post-confirmation Tailnet Policy apply to abort when the re-read plan differs from the accepted preview, preventing unreviewed concurrent policy mutations.
 - Removed the resolved `# Review notes` section from `issues.md`.
 - Verified with focused SSH and Tailnet Policy regression tests, `go test ./...` from `go/cli`, and `git diff --check`.
+
+2026-05-24
+
+- Selected Issue 16 as the next highest-priority agent-owned task because Issue 10 remains blocked on human live-validation credentials, and existing-server verification still needed a clear guard for missing Tailscale Credentials.
+- Added Issue 16 to track requiring Tailscale Credentials before verifying an existing saved Tailscale Personal Server.
+- Used a focused TDD slice to reproduce that `myn configure` could verify a saved Tailscale Personal Server without saved Tailscale Credentials when the device lookup path answered.
+- Updated existing-server verification to fail with `myn auth tailscale` guidance before any Tailscale device lookup when saved Tailscale Credentials are missing.
+- Updated Issue 16 status and acceptance criteria in `issues.md`.
+- Verified with focused existing-server verification tests, `go test ./...` from `go/cli`, and `git diff --check`.

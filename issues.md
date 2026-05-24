@@ -410,3 +410,26 @@ Move duplicate Hetzner server name and duplicate Tailscale Host checks earlier i
 ## Blocked by
 
 - Issue 8: Orchestrate Tailscale-only configure completion
+
+## Issue 16: Require Tailscale Credentials for existing-server verification
+
+Type: AFK
+
+Suggested label: `ready-for-agent`
+
+Status: Done
+
+## What to build
+
+Make `myn configure` fail clearly when a saved Tailscale-only Personal Server Configuration exists but Tailscale Credentials are missing. Existing-server verification needs the saved tailnet to check the Tailscale Host, so it should stop with `myn auth tailscale` guidance instead of attempting a Tailscale device lookup with empty credentials or treating the configuration as verified.
+
+## Acceptance criteria
+
+- [x] Existing Tailscale Personal Server verification requires saved Tailscale Credentials before checking Tailscale devices.
+- [x] Missing Tailscale Credentials fail with a clear `myn auth tailscale` guidance message.
+- [x] Missing Tailscale Credentials do not enter the Personal Server creation path or attempt a Tailscale device lookup.
+- [x] Existing verified-server and missing-device behavior remains unchanged when Tailscale Credentials are configured.
+
+## Blocked by
+
+- Issue 9: Verify existing Tailscale Personal Server configuration
