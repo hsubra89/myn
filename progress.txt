@@ -6,3 +6,14 @@
 - Preserved existing Project Session and tmux handoff behavior, including session numbering, terminal validation, quiet successful handoff, and SSH exit status preservation.
 - Updated Issue 2 status and acceptance criteria in `issues.md`.
 - Verified with `go test ./...` from `go/cli`.
+
+2026-05-24
+
+- Selected Issue 1 as the next highest-priority task because Tailscale Credentials are the unblocked prerequisite for configure-time LocalAPI checks, Tailnet Policy planning, auth-key creation, and the rest of the provisioning sequence.
+- Implemented `myn auth tailscale` under the existing `auth` namespace with `--token`, `--tailnet`, `TAILSCALE_API_TOKEN`, and `TAILSCALE_TAILNET` support.
+- Added interactive Tailscale auth flow that opens the Tailscale Keys page, prints the URL when browser opening fails, prompts for the API access token, infers a single tailnet when possible, and prompts when inference is ambiguous.
+- Added saved Tailscale Credentials as `auth.tailscale.token` and `auth.tailscale.tailnet` only; validation keys are not saved or printed.
+- Added Tailscale cloud validation through the official Tailscale API client for policy read, policy validation, safe no-op policy update with ETag, device listing, and auth-key creation capability.
+- Added tests for successful save, env-driven auth, API validation request shape, invalid token failure, insufficient capability failure, tailnet inference, ambiguous tailnet prompting, browser fallback, output secret non-leakage, and config file permissions.
+- Updated Issue 1 status and acceptance criteria in `issues.md`.
+- Verified with `go test ./...` from `go/cli`.

@@ -12,6 +12,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v2 v2.4.2
 	golang.org/x/sys v0.43.0
+	tailscale.com/client/tailscale/v2 v2.9.0
 )
 
 require (
@@ -44,8 +45,10 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/tailscale/hujson v0.0.0-20220506213045-af5ed07155e5 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect

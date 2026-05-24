@@ -8,20 +8,22 @@ Type: AFK
 
 Suggested label: `ready-for-agent`
 
+Status: Done
+
 ## What to build
 
 Add first-class Tailscale authentication to Myn. `myn auth tailscale` should collect, validate, and persist Tailscale Credentials consisting of an API access token and tailnet identifier. It should work interactively, with environment variables for automation, and should validate that the token can perform every cloud API operation needed for Tailscale-only Personal Server provisioning.
 
 ## Acceptance criteria
 
-- [ ] `myn auth tailscale` is available under the existing `auth` command namespace.
-- [ ] Interactive auth opens the Tailscale Keys page, falls back to printing the URL if opening fails, and prompts for an API access token.
-- [ ] Non-interactive auth accepts `TAILSCALE_API_TOKEN` and supports `TAILSCALE_TAILNET` or an equivalent tailnet override when inference is ambiguous.
-- [ ] The command infers the tailnet when possible and prompts interactively when inference is ambiguous.
-- [ ] The command validates policy read, policy validation, safe no-op policy update, device listing, and auth key creation capability before saving credentials.
-- [ ] Only `auth.tailscale.token` and `auth.tailscale.tailnet` are saved.
-- [ ] Invalid, expired, or insufficient-scope tokens fail with specific messages and are not saved.
-- [ ] Tests cover successful save, invalid token, insufficient capability, env-driven auth, ambiguous tailnet, and config file permissions.
+- [x] `myn auth tailscale` is available under the existing `auth` command namespace.
+- [x] Interactive auth opens the Tailscale Keys page, falls back to printing the URL if opening fails, and prompts for an API access token.
+- [x] Non-interactive auth accepts `TAILSCALE_API_TOKEN` and supports `TAILSCALE_TAILNET` or an equivalent tailnet override when inference is ambiguous.
+- [x] The command infers the tailnet when possible and prompts interactively when inference is ambiguous.
+- [x] The command validates policy read, policy validation, safe no-op policy update, device listing, and auth key creation capability before saving credentials.
+- [x] Only `auth.tailscale.token` and `auth.tailscale.tailnet` are saved.
+- [x] Invalid, expired, or insufficient-scope tokens fail with specific messages and are not saved.
+- [x] Tests cover successful save, invalid token, insufficient capability, env-driven auth, ambiguous tailnet, and config file permissions.
 
 ## Blocked by
 

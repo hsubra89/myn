@@ -5,14 +5,23 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
+const tailscaleKeysURL = "https://login.tailscale.com/admin/settings/keys"
+
 type hetznerAuthOptions struct {
 	token             string
 	fromHcloudContext string
+}
+
+type tailscaleAuthOptions struct {
+	token   string
+	tailnet string
 }
 
 type hetznerAuthDeps struct {
@@ -23,6 +32,20 @@ type hetznerAuthDeps struct {
 	prompter         hetznerAuthPrompter
 }
 
+type tailscaleAuthDeps struct {
+	appConfigPath       func() (string, error)
+	env                 func(string) string
+	validateCredentials func(context.Context, tailscaleCredentials) error
+	inferTailnets       func(context.Context, string) ([]string, error)
+	openURL             func(string) error
+	prompter            tailscaleAuthPrompter
+}
+
+type tailscaleCredentials struct {
+	Token   string
+	Tailnet string
+}
+
 func newAuthCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -30,6 +53,7 @@ func newAuthCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newHetznerAuthCommand())
+	cmd.AddCommand(newTailscaleAuthCommand())
 
 	return cmd
 }
@@ -52,6 +76,24 @@ func newHetznerAuthCommand() *cobra.Command {
 	return cmd
 }
 
+func newTailscaleAuthCommand() *cobra.Command {
+	var opts tailscaleAuthOptions
+
+	cmd := &cobra.Command{
+		Use:   "tailscale",
+		Short: "Configure Tailscale authentication",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTailscaleAuth(cmd.Context(), cmd.OutOrStdout(), opts, defaultTailscaleAuthDeps())
+		},
+	}
+
+	cmd.Flags().StringVar(&opts.token, "token", "", "Tailscale API access token to validate and save")
+	cmd.Flags().StringVar(&opts.tailnet, "tailnet", "", "Tailscale tailnet identifier to validate and save")
+
+	return cmd
+}
+
 func defaultHetznerAuthDeps() hetznerAuthDeps {
 	env := os.Getenv
 	validator := newHetznerValidator(env("HCLOUD_ENDPOINT"))
@@ -66,6 +108,23 @@ func defaultHetznerAuthDeps() hetznerAuthDeps {
 		env:           env,
 		validateToken: validator.validate,
 		prompter:      huhPrompter{},
+	}
+}
+
+func defaultTailscaleAuthDeps() tailscaleAuthDeps {
+	env := os.Getenv
+	validator := newTailscaleCloudValidator(env("TAILSCALE_ENDPOINT"))
+	discoverer := newTailscaleTailnetDiscoverer(env("TAILSCALE_ENDPOINT"))
+
+	return tailscaleAuthDeps{
+		appConfigPath: func() (string, error) {
+			return defaultAppConfigPath(env)
+		},
+		env:                 env,
+		validateCredentials: validator.validate,
+		inferTailnets:       discoverer.inferTailnets,
+		openURL:             openBrowserURL,
+		prompter:            huhPrompter{},
 	}
 }
 
@@ -135,6 +194,81 @@ func runHetznerAuth(ctx context.Context, out io.Writer, opts hetznerAuthOptions,
 	return validateSaveAndReport(ctx, out, appConfigPath, deps, strings.TrimSpace(token), "")
 }
 
+func runTailscaleAuth(ctx context.Context, out io.Writer, opts tailscaleAuthOptions, deps tailscaleAuthDeps) error {
+	deps = fillTailscaleAuthDeps(deps)
+
+	appConfigPath, err := deps.appConfigPath()
+	if err != nil {
+		return err
+	}
+
+	token := firstNonEmpty(strings.TrimSpace(opts.token), strings.TrimSpace(deps.env("TAILSCALE_API_TOKEN")))
+	tailnet := firstNonEmpty(strings.TrimSpace(opts.tailnet), strings.TrimSpace(deps.env("TAILSCALE_TAILNET")))
+
+	if token == "" {
+		if !deps.prompter.CanPrompt() {
+			return fmt.Errorf("interactive Tailscale authentication requires a terminal; pass --token or set TAILSCALE_API_TOKEN")
+		}
+		if err := deps.openURL(tailscaleKeysURL); err != nil {
+			fmt.Fprintf(out, "Open %s to create a Tailscale API access token.\n", tailscaleKeysURL)
+		}
+		inputToken, err := deps.prompter.InputTailscaleToken()
+		if err != nil {
+			return err
+		}
+		token = strings.TrimSpace(inputToken)
+	}
+
+	if tailnet == "" {
+		var inferErr error
+		inferred, inferErr := deps.inferTailnets(ctx, token)
+		if inferErr == nil {
+			switch len(inferred) {
+			case 1:
+				tailnet = strings.TrimSpace(inferred[0])
+			default:
+				if len(inferred) > 1 {
+					if !deps.prompter.CanPrompt() {
+						return fmt.Errorf("Tailscale tailnet is ambiguous; pass --tailnet or set TAILSCALE_TAILNET")
+					}
+					selected, err := deps.prompter.SelectTailnet(inferred)
+					if err != nil {
+						return err
+					}
+					tailnet = strings.TrimSpace(selected)
+				}
+			}
+		}
+		if tailnet == "" {
+			if !deps.prompter.CanPrompt() {
+				if inferErr != nil {
+					return fmt.Errorf("Tailscale tailnet could not be inferred: %v; pass --tailnet or set TAILSCALE_TAILNET", inferErr)
+				}
+				return fmt.Errorf("Tailscale tailnet could not be inferred; pass --tailnet or set TAILSCALE_TAILNET")
+			}
+			inputTailnet, err := deps.prompter.InputTailnet()
+			if err != nil {
+				return err
+			}
+			tailnet = strings.TrimSpace(inputTailnet)
+		}
+	}
+
+	credentials := tailscaleCredentials{
+		Token:   strings.TrimSpace(token),
+		Tailnet: strings.TrimSpace(tailnet),
+	}
+	if err := deps.validateCredentials(ctx, credentials); err != nil {
+		return fmt.Errorf("Tailscale token validation failed: %s", err)
+	}
+	if err := saveTailscaleCredentials(appConfigPath, credentials); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out, "Saved Tailscale credentials.")
+	return nil
+}
+
 func fillHetznerAuthDeps(deps hetznerAuthDeps) hetznerAuthDeps {
 	if deps.env == nil {
 		deps.env = os.Getenv
@@ -152,6 +286,32 @@ func fillHetznerAuthDeps(deps hetznerAuthDeps) hetznerAuthDeps {
 	if deps.validateToken == nil {
 		validator := newHetznerValidator(deps.env("HCLOUD_ENDPOINT"))
 		deps.validateToken = validator.validate
+	}
+	if deps.prompter == nil {
+		deps.prompter = huhPrompter{}
+	}
+	return deps
+}
+
+func fillTailscaleAuthDeps(deps tailscaleAuthDeps) tailscaleAuthDeps {
+	if deps.env == nil {
+		deps.env = os.Getenv
+	}
+	if deps.appConfigPath == nil {
+		deps.appConfigPath = func() (string, error) {
+			return defaultAppConfigPath(deps.env)
+		}
+	}
+	if deps.validateCredentials == nil {
+		validator := newTailscaleCloudValidator(deps.env("TAILSCALE_ENDPOINT"))
+		deps.validateCredentials = validator.validate
+	}
+	if deps.inferTailnets == nil {
+		discoverer := newTailscaleTailnetDiscoverer(deps.env("TAILSCALE_ENDPOINT"))
+		deps.inferTailnets = discoverer.inferTailnets
+	}
+	if deps.openURL == nil {
+		deps.openURL = openBrowserURL
 	}
 	if deps.prompter == nil {
 		deps.prompter = huhPrompter{}
@@ -260,6 +420,43 @@ func saveHetznerToken(path string, token string) error {
 
 	cfg.Auth.Hetzner.Token = token
 	return saveAppConfig(path, cfg)
+}
+
+func saveTailscaleCredentials(path string, credentials tailscaleCredentials) error {
+	cfg, err := loadAppConfig(path)
+	if err != nil {
+		return err
+	}
+
+	cfg.Auth.Tailscale.Token = credentials.Token
+	cfg.Auth.Tailscale.Tailnet = credentials.Tailnet
+	return saveAppConfig(path, cfg)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func openBrowserURL(rawURL string) error {
+	var command string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		command = "open"
+		args = []string{rawURL}
+	case "windows":
+		command = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", rawURL}
+	default:
+		command = "xdg-open"
+		args = []string{rawURL}
+	}
+	return exec.Command(command, args...).Start()
 }
 
 func reportExistingTokenFailure(out io.Writer, err error) {

@@ -17,11 +17,17 @@ type appConfig struct {
 }
 
 type authConfig struct {
-	Hetzner hetznerConfig `json:"hetzner,omitempty"`
+	Hetzner   hetznerConfig   `json:"hetzner,omitempty"`
+	Tailscale tailscaleConfig `json:"tailscale,omitempty"`
 }
 
 type hetznerConfig struct {
 	Token string `json:"token,omitempty"`
+}
+
+type tailscaleConfig struct {
+	Token   string `json:"token,omitempty"`
+	Tailnet string `json:"tailnet,omitempty"`
 }
 
 type projectsConfig struct {
@@ -83,11 +89,15 @@ func (cfg appConfig) MarshalJSON() ([]byte, error) {
 }
 
 func (cfg authConfig) isZero() bool {
-	return cfg.Hetzner.isZero()
+	return cfg.Hetzner.isZero() && cfg.Tailscale.isZero()
 }
 
 func (cfg hetznerConfig) isZero() bool {
 	return cfg.Token == ""
+}
+
+func (cfg tailscaleConfig) isZero() bool {
+	return cfg.Token == "" && cfg.Tailnet == ""
 }
 
 func (cfg projectsConfig) isZero() bool {
