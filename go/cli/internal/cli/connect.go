@@ -40,6 +40,7 @@ type connectPlan struct {
 	sshUser           string
 	sshHost           string
 	sshIdentityPath   string
+	knownHostsPath    string
 	remotePath        string
 	remoteProjectRoot string
 	tmuxSessionName   string
@@ -225,7 +226,12 @@ func planPersonalServerConnectionFromDeps(deps connectDeps) (connectPlan, error)
 	if err != nil {
 		return connectPlan{}, fmt.Errorf("find user home directory: %w", err)
 	}
-	return planPersonalServerConnection(cfg, home, deps)
+	plan, err := planPersonalServerConnection(cfg, home, deps)
+	if err != nil {
+		return connectPlan{}, err
+	}
+	plan.knownHostsPath = personalServerKnownHostsPath(configPath)
+	return plan, nil
 }
 
 func planPersonalServerConnection(cfg appConfig, home string, deps connectDeps) (connectPlan, error) {
@@ -338,8 +344,7 @@ func connectSSHCommand(plan connectPlan, mode connectProjectSessionMode, session
 		plan.sshIdentityPath,
 		plan.sshUser,
 		plan.sshHost,
-		"-t",
-		"-o", "StrictHostKeyChecking=accept-new",
+		connectHostKeyOptions(plan, "-t")...,
 	)
 	return append(command, "bash", "-lc", shellQuote(connectRemoteHandoffCommand(plan, mode, sessionNumber)))
 }
@@ -349,9 +354,20 @@ func sessionsSSHCommand(plan connectPlan) []string {
 		plan.sshIdentityPath,
 		plan.sshUser,
 		plan.sshHost,
-		"-o", "StrictHostKeyChecking=accept-new",
+		connectHostKeyOptions(plan)...,
 	)
 	return append(command, "bash", "-lc", shellQuote(sessionsRemoteListCommand()))
+}
+
+// connectHostKeyOptions verifies the server against the myn-managed
+// known_hosts file, which provisioning seeds with the pinned host key. An
+// unknown or changed host key is fatal.
+func connectHostKeyOptions(plan connectPlan, options ...string) []string {
+	options = append(options, "-o", "StrictHostKeyChecking=yes")
+	if strings.TrimSpace(plan.knownHostsPath) != "" {
+		options = append(options, "-o", sshUserKnownHostsOption(plan.knownHostsPath))
+	}
+	return options
 }
 
 func connectRemoteHandoffCommand(plan connectPlan, mode connectProjectSessionMode, sessionNumber int) string {

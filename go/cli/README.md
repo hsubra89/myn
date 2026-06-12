@@ -225,8 +225,8 @@ pricing is available, or clearly says the price is unavailable.
 Before creating cloud resources, `configure` shows an install plan grouped as:
 
 - System services: security updates, unattended security upgrades, Docker
-  Engine, Docker Compose, Mosh access, the Personal Server User, SSH access,
-  and the remote project root.
+  Engine, Docker Compose, Mosh access, the Personal Server User, SSH access
+  with a pinned host key, and the remote project root.
 - Homebrew tools: `tmux`, `jq`, `git`, `gh`, `rustup`, `go`, `nvm`, latest LTS
   Node.js, and npm.
 - Coding agents: Codex and Claude Code.
@@ -241,18 +241,29 @@ group. Docker group membership is root-equivalent access on the server even
 though sudo itself requires the password collected during provisioning. That
 password is hashed locally for cloud-init and is not saved in config.
 
+Before the create request, `configure` generates the server's Ed25519 SSH host
+key locally with `ssh-keygen` and delivers it through cloud-init, which deletes
+the image host keys and installs only this one. The host public key is pinned
+for both assigned addresses in a myn-managed `known_hosts` file stored beside
+the myn config file, and the host key fingerprint is printed after creation.
+All provisioning SSH runs as the Personal Server User with
+`StrictHostKeyChecking=yes` against that pinned file, so the first connection
+to a fresh server cannot be intercepted by a host key swap. Root is never
+authorized for SSH: cloud-init disables root login, and bootstrap removes
+root's `authorized_keys` after the hardened SSH profile is applied.
+
 After Hetzner accepts the create request, `configure` waits for create actions,
-root SSH readiness, and the cloud-init Personal Server Bootstrap completion
-marker. A created server ID, Personal Server User, and assigned IP addresses are
-saved even if bootstrap fails or times out, so the billable server can be
-inspected.
+Personal Server User SSH readiness, and the cloud-init Personal Server
+Bootstrap completion marker. A created server ID, Personal Server User, and
+assigned IP addresses are saved even if bootstrap fails or times out, so the
+billable server can be inspected.
 
 When provisioning finishes successfully, `configure` prints SSH commands for
-the Personal Server User and root over IPv4 and IPv6, IPv4 first. Each SSH
-command includes `-i` with the configured SSH identity and `-l` with the login
-user, so IPv6 addresses are passed as unbracketed host arguments. It also
-prints Mosh commands for the Personal Server User with the configured SSH
-identity passed through `--ssh`.
+the Personal Server User over IPv4 and IPv6, IPv4 first. Each SSH command
+includes `-i` with the configured SSH identity and `-l` with the login user, so
+IPv6 addresses are passed as unbracketed host arguments. It also prints Mosh
+commands for the Personal Server User with the configured SSH identity passed
+through `--ssh`.
 
 `myn` creates or reuses the `myn-personal-server` firewall and a Hetzner SSH key
 resource for the configured SSH identity. A newly created firewall allows
@@ -296,9 +307,12 @@ before SSH.
 The command connects over SSH, preferring the saved IPv4 address and falling
 back to the saved IPv6 address when IPv4 is unavailable. The Personal Server
 User is passed to SSH with `-l`, so IPv6 addresses are passed as unbracketed
-host arguments. The configured SSH identity is passed with `-i`, SSH requests
-one TTY allocation, and host key checking uses
-`StrictHostKeyChecking=accept-new`.
+host arguments. The configured SSH identity is passed with `-i`, and SSH
+requests one TTY allocation. Host keys are verified strictly
+(`StrictHostKeyChecking=yes`) against the myn-managed `known_hosts` file stored
+beside the myn config file, which provisioning seeds with the pinned host key;
+an unknown or changed host key is fatal. Servers provisioned before host key
+pinning must be re-provisioned.
 
 On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. Each
 Project can have multiple numbered Project Sessions. Session `1` uses the stable

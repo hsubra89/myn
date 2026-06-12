@@ -101,7 +101,6 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}
 	identityPath := filepath.Join(home, ".ssh", "id_ed25519")
 	generateLiveValidationSSHKey(t, identityPath)
-	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 	publicKeyLine := liveValidationSSHPublicKey(t, identityPath)
 	publicKey, err := parseSSHPublicKey(publicKeyLine)
 	if err != nil {
@@ -113,6 +112,7 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}
 
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	knownHostsPath := personalServerKnownHostsPath(configPath)
 	serverName := liveValidationServerName(t)
 	client := liveValidationHcloudClient(token)
 	t.Cleanup(func() {
@@ -181,7 +181,6 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH:           liveValidationSSHRunner(knownHostsPath),
 			bootstrapTimeout: liveValidationBootstrapLimit,
 			currentUsername: func() string {
 				return liveValidationUser
@@ -333,25 +332,11 @@ func liveValidationHcloudClient(token string) *hcloud.Client {
 	)
 }
 
+// liveValidationSSHRunner verifies strictly against the known_hosts file the
+// real provisioning path seeds with the pinned host key, so live validation
+// also proves the pinned key matches what the server presents.
 func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
-	return func(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-		if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
-			return "", fmt.Errorf("create isolated SSH known_hosts directory: %w", err)
-		}
-		args := personalServerSSHCommandArgs(identityFile, user, host,
-			"-o", "BatchMode=yes",
-			"-o", "StrictHostKeyChecking=accept-new",
-			"-o", "UserKnownHostsFile="+knownHostsPath,
-			"-o", "ConnectTimeout=10",
-		)
-		args = append(args, command)
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", commandOutputError("ssh", output, err)
-		}
-		return string(output), nil
-	}
+	return pinnedPersonalServerSSHRunner(knownHostsPath)
 }
 
 type liveValidationConfigurePrompter struct {
@@ -590,7 +575,7 @@ func assertLiveValidationSSHKey(t *testing.T, ctx context.Context, client *hclou
 
 func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, identityPath string, knownHostsPath string, host string) {
 	t.Helper()
-	markerOutput := liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "cat "+personalServerBootstrapMarkerPath)
+	markerOutput := liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "cat "+personalServerBootstrapMarkerPath)
 	marker, err := parsePersonalServerBootstrapMarker(markerOutput)
 	if err != nil {
 		t.Fatalf("parse live Personal Server Bootstrap marker: %v", err)
@@ -617,16 +602,18 @@ func assertLiveValidationBootstrap(t *testing.T, ctx context.Context, identityPa
 
 func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, identityPath string, knownHostsPath string, host string) {
 	t.Helper()
-	liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "true")
+	if output, err := liveValidationSSHRunner(knownHostsPath)(ctx, identityPath, "root", host, "true"); err == nil {
+		t.Fatalf("root SSH should be rejected after bootstrap, got output %q", output)
+	}
 	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "id -un")); got != liveValidationUser {
 		t.Fatalf("live Personal Server User SSH mismatch: want %q, got %q", liveValidationUser, got)
 	}
 
-	passwd := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "getent passwd "+shellQuote(liveValidationUser)+" | cut -d: -f1,7"))
+	passwd := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "getent passwd "+shellQuote(liveValidationUser)+" | cut -d: -f1,7"))
 	if passwd != liveValidationUser+":/bin/bash" {
 		t.Fatalf("live Personal Server User passwd entry mismatch: %q", passwd)
 	}
-	groups := strings.Fields(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, "id -nG "+shellQuote(liveValidationUser)))
+	groups := strings.Fields(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, "id -nG "+shellQuote(liveValidationUser)))
 	for _, group := range []string{"sudo", "docker"} {
 		if !containsString(groups, group) {
 			t.Fatalf("live Personal Server User missing %s group: %v", group, groups)
@@ -635,7 +622,7 @@ func assertLiveValidationRemoteSetup(t *testing.T, ctx context.Context, identity
 
 	remoteRoot := "/home/" + liveValidationUser + "/" + liveValidationRemoteRoot
 	statCommand := "stat -c '%U:%G:%F' " + shellQuote(remoteRoot)
-	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, "root", host, statCommand)); got != liveValidationUser+":"+liveValidationUser+":directory" {
+	if got := strings.TrimSpace(liveValidationSSH(t, ctx, identityPath, knownHostsPath, liveValidationUser, host, statCommand)); got != liveValidationUser+":"+liveValidationUser+":directory" {
 		t.Fatalf("live remote project root mismatch: %q", got)
 	}
 

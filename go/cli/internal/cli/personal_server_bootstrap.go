@@ -21,6 +21,8 @@ type personalServerBootstrapInput struct {
 	User              string
 	PasswordHash      string
 	SSHPublicKey      string
+	HostPublicKey     string
+	HostPrivateKey    string
 	RemoteProjectRoot string
 	GitIdentity       personalServerGitIdentity
 	ToolPlan          personalServerBootstrapToolPlan
@@ -51,6 +53,9 @@ type personalServerCloudInit struct {
 	PackageRebootIfRequired bool                               `yaml:"package_reboot_if_required"`
 	SSHPwAuth               bool                               `yaml:"ssh_pwauth"`
 	DisableRoot             bool                               `yaml:"disable_root"`
+	SSHDeleteKeys           bool                               `yaml:"ssh_deletekeys"`
+	SSHGenKeyTypes          []string                           `yaml:"ssh_genkeytypes"`
+	SSHKeys                 map[string]string                  `yaml:"ssh_keys"`
 	Groups                  []string                           `yaml:"groups,omitempty"`
 	Users                   []personalServerCloudInitUser      `yaml:"users"`
 	WriteFiles              []personalServerCloudInitWriteFile `yaml:"write_files"`
@@ -86,13 +91,15 @@ func renderPersonalServerBootstrapCloudInit(input personalServerBootstrapInput) 
 		PackageUpgrade:          true,
 		PackageRebootIfRequired: true,
 		SSHPwAuth:               false,
-		DisableRoot:             false,
-		Groups:                  []string{"docker"},
+		DisableRoot:             true,
+		SSHDeleteKeys:           true,
+		SSHGenKeyTypes:          []string{"ed25519"},
+		SSHKeys: map[string]string{
+			"ed25519_private": withTrailingNewline(input.HostPrivateKey),
+			"ed25519_public":  withTrailingNewline(strings.TrimSpace(input.HostPublicKey)),
+		},
+		Groups: []string{"docker"},
 		Users: []personalServerCloudInitUser{
-			{
-				Name:              "root",
-				SSHAuthorizedKeys: []string{strings.TrimSpace(input.SSHPublicKey)},
-			},
 			{
 				Name:              input.User,
 				Shell:             "/bin/bash",
@@ -130,6 +137,12 @@ func validatePersonalServerBootstrapInput(input personalServerBootstrapInput) er
 	}
 	if strings.TrimSpace(input.SSHPublicKey) == "" {
 		return fmt.Errorf("SSH public key is required")
+	}
+	if _, err := parseSSHPublicKey(input.HostPublicKey); err != nil {
+		return fmt.Errorf("SSH host public key is invalid: %w", err)
+	}
+	if strings.TrimSpace(input.HostPrivateKey) == "" {
+		return fmt.Errorf("SSH host private key is required")
 	}
 	if _, err := normalizeRemoteProjectRoot(input.RemoteProjectRoot); err != nil {
 		return err
@@ -383,6 +396,8 @@ if ! systemctl reload ssh; then
   fi
 fi
 
+rm -f /root/.ssh/authorized_keys
+
 write_marker "success" ""`)
 }
 
@@ -451,4 +466,11 @@ func shellQuote(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func withTrailingNewline(value string) string {
+	if strings.HasSuffix(value, "\n") {
+		return value
+	}
+	return value + "\n"
 }
