@@ -68,7 +68,7 @@ func TestConnectFromConfiguredRootStartsSSHBackedTmux(t *testing.T) {
 	wantCommand := []string{
 		"ssh",
 		"-t",
-		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "StrictHostKeyChecking=yes",
 		"-o", sshUserKnownHostsOption(personalServerKnownHostsPath(configPath)),
 		"-o", "IdentitiesOnly=yes",
 		"-i", identity.PrivatePath,
@@ -109,7 +109,7 @@ func TestConnectFromConfiguredSubdirectoryMapsToMatchingRemotePath(t *testing.T)
 	wantCommand := []string{
 		"ssh",
 		"-t",
-		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "StrictHostKeyChecking=yes",
 		"-o", sshUserKnownHostsOption(personalServerKnownHostsPath(fixture.configPath)),
 		"-o", "IdentitiesOnly=yes",
 		"-i", fixture.identity.PrivatePath,
@@ -142,7 +142,7 @@ func TestConnectRemoteHandoffAttachesExistingProjectTmuxSessionBeforeFallback(t 
 	wantCommand := []string{
 		"ssh",
 		"-t",
-		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "StrictHostKeyChecking=yes",
 		"-o", "IdentitiesOnly=yes",
 		"-i", "/home/harish/.ssh/id_ed25519",
 		"-l", "harish",
@@ -547,7 +547,7 @@ func TestConnectWithSessionNumberAttachesExistingProjectSessionOnly(t *testing.T
 	wantCommand := []string{
 		"ssh",
 		"-t",
-		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "StrictHostKeyChecking=yes",
 		"-o", sshUserKnownHostsOption(personalServerKnownHostsPath(fixture.configPath)),
 		"-o", "IdentitiesOnly=yes",
 		"-i", fixture.identity.PrivatePath,

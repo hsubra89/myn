@@ -360,11 +360,10 @@ func sessionsSSHCommand(plan connectPlan) []string {
 }
 
 // connectHostKeyOptions verifies the server against the myn-managed
-// known_hosts file, which is seeded with the pinned host key at provisioning
-// time. accept-new only applies to servers provisioned before host key
-// pinning existed; once an entry is recorded, a changed key is fatal.
+// known_hosts file, which provisioning seeds with the pinned host key. An
+// unknown or changed host key is fatal.
 func connectHostKeyOptions(plan connectPlan, options ...string) []string {
-	options = append(options, "-o", "StrictHostKeyChecking=accept-new")
+	options = append(options, "-o", "StrictHostKeyChecking=yes")
 	if strings.TrimSpace(plan.knownHostsPath) != "" {
 		options = append(options, "-o", sshUserKnownHostsOption(plan.knownHostsPath))
 	}

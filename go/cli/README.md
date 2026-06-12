@@ -308,11 +308,11 @@ The command connects over SSH, preferring the saved IPv4 address and falling
 back to the saved IPv6 address when IPv4 is unavailable. The Personal Server
 User is passed to SSH with `-l`, so IPv6 addresses are passed as unbracketed
 host arguments. The configured SSH identity is passed with `-i`, and SSH
-requests one TTY allocation. Host keys are verified against the myn-managed
-`known_hosts` file stored beside the myn config file, which provisioning seeds
-with the pinned host key; a changed host key is fatal.
-`StrictHostKeyChecking=accept-new` only applies to servers provisioned before
-host key pinning existed, recording their key on first connect.
+requests one TTY allocation. Host keys are verified strictly
+(`StrictHostKeyChecking=yes`) against the myn-managed `known_hosts` file stored
+beside the myn config file, which provisioning seeds with the pinned host key;
+an unknown or changed host key is fatal. Servers provisioned before host key
+pinning must be re-provisioned.
 
 On the Personal Server, `myn connect` runs a Bash login-shell tmux handoff. Each
 Project can have multiple numbered Project Sessions. Session `1` uses the stable

@@ -101,7 +101,6 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}
 	identityPath := filepath.Join(home, ".ssh", "id_ed25519")
 	generateLiveValidationSSHKey(t, identityPath)
-	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 	publicKeyLine := liveValidationSSHPublicKey(t, identityPath)
 	publicKey, err := parseSSHPublicKey(publicKeyLine)
 	if err != nil {
@@ -113,6 +112,7 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 	}
 
 	configPath := filepath.Join(t.TempDir(), "myn", "config.json")
+	knownHostsPath := personalServerKnownHostsPath(configPath)
 	serverName := liveValidationServerName(t)
 	client := liveValidationHcloudClient(token)
 	t.Cleanup(func() {
@@ -181,7 +181,6 @@ func TestLivePersonalServerProvisioning(t *testing.T) {
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH:           liveValidationSSHRunner(knownHostsPath),
 			bootstrapTimeout: liveValidationBootstrapLimit,
 			currentUsername: func() string {
 				return liveValidationUser
@@ -333,25 +332,11 @@ func liveValidationHcloudClient(token string) *hcloud.Client {
 	)
 }
 
+// liveValidationSSHRunner verifies strictly against the known_hosts file the
+// real provisioning path seeds with the pinned host key, so live validation
+// also proves the pinned key matches what the server presents.
 func liveValidationSSHRunner(knownHostsPath string) personalServerSSHRunner {
-	return func(ctx context.Context, identityFile string, user string, host string, command string) (string, error) {
-		if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
-			return "", fmt.Errorf("create isolated SSH known_hosts directory: %w", err)
-		}
-		args := personalServerSSHCommandArgs(identityFile, user, host,
-			"-o", "BatchMode=yes",
-			"-o", "StrictHostKeyChecking=accept-new",
-			"-o", "UserKnownHostsFile="+knownHostsPath,
-			"-o", "ConnectTimeout=10",
-		)
-		args = append(args, command)
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", commandOutputError("ssh", output, err)
-		}
-		return string(output), nil
-	}
+	return pinnedPersonalServerSSHRunner(knownHostsPath)
 }
 
 type liveValidationConfigurePrompter struct {
