@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -676,7 +677,8 @@ func TestRunConfigureCollectsPersonalServerCreationInputsAndDeclinesFinalConfirm
 		"Install plan:",
 		"System services:",
 		"- security updates and unattended security upgrades",
-		"- hardened SSH daemon profile (key-only Personal Server User login; root SSH disabled after bootstrap)",
+		"- hardened SSH daemon profile (key-only Personal Server User login; no root SSH)",
+		"- locally generated Ed25519 SSH host key pinned in the myn known_hosts file",
 		"- Mosh Access",
 		"- Docker Engine and Docker Compose",
 		"- Homebrew",
@@ -926,6 +928,9 @@ func TestRunConfigureCreatesHetznerResourcesAndSavesPersonalServer(t *testing.T)
 	if !strings.Contains(create.UserData, "#cloud-config\n") || !strings.Contains(create.UserData, "MYN_REMOTE_PROJECT_ROOT='/home/harish/Remote Projects'") {
 		t.Fatalf("server create should include rendered Personal Server Bootstrap cloud-init, got %q", create.UserData)
 	}
+	if !strings.Contains(create.UserData, "disable_root: true") || !strings.Contains(create.UserData, "ed25519_private") {
+		t.Fatalf("server create should disable root SSH and deliver the pinned host key, got %q", create.UserData)
+	}
 	if got, want := cloud.waitedActionIDs, []int{9001}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("waited actions mismatch: want %v, got %v", want, got)
 	}
@@ -1016,7 +1021,8 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH: ssh.Run,
+			runSSH:          ssh.Run,
+			generateHostKey: testGeneratePersonalServerHostKey,
 			currentUsername: func() string {
 				return "harish"
 			},
@@ -1026,11 +1032,22 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "true"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
+
+	knownHosts, err := os.ReadFile(personalServerKnownHostsPath(configPath))
+	if err != nil {
+		t.Fatalf("read pinned known_hosts: %v", err)
+	}
+	wantKnownHosts := "203.0.113.55 " + testPersonalServerHostKey().PublicKey + "\n" +
+		"2001:db8::55 " + testPersonalServerHostKey().PublicKey + "\n"
+	if got := string(knownHosts); got != wantKnownHosts {
+		t.Fatalf("pinned known_hosts mismatch: want %q, got %q", wantKnownHosts, got)
+	}
+
 	output := out.String()
 	for _, want := range []string{
 		"Personal Server created: server 654321.",
@@ -1064,7 +1081,7 @@ func TestRunConfigurePollsBootstrapAndReportsAccess(t *testing.T) {
 	}
 }
 
-func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
+func TestRunConfigureNeverPollsBootstrapAsRoot(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -1077,17 +1094,7 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 		t.Fatalf("seed config: %v", err)
 	}
 
-	ssh := &fakePersonalServerSSHRunner{
-		errors: []error{
-			nil,
-			errors.New("root login disabled"),
-			nil,
-		},
-		outputs: []string{
-			"ready\n",
-			`{"status":"success","timestamp":"2026-05-10T12:00:00Z","toolVersions":{"docker":"Docker version 28.1.0"}}`,
-		},
-	}
+	ssh := newSuccessfulPersonalServerSSHRunner()
 
 	var out bytes.Buffer
 	if err := runConfigure(&out, configureOptions{
@@ -1118,7 +1125,8 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH: ssh.Run,
+			runSSH:          ssh.Run,
+			generateHostKey: testGeneratePersonalServerHostKey,
 			currentUsername: func() string {
 				return "harish"
 			},
@@ -1127,15 +1135,13 @@ func TestRunConfigureFallsBackToUserSSHWhenRootSSHIsHardened(t *testing.T) {
 		t.Fatalf("run configure: %v", err)
 	}
 
-	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-	}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
+	for _, call := range ssh.calls {
+		if call.user == "root" {
+			t.Fatalf("provisioning should never SSH as root, got %#v", ssh.calls)
+		}
 	}
 	if strings.Contains(out.String(), "- root IPv4:") {
-		t.Fatalf("successful hardened bootstrap should not print root SSH commands, got %q", out.String())
+		t.Fatalf("successful bootstrap should not print root SSH commands, got %q", out.String())
 	}
 	if !strings.Contains(out.String(), "Personal Server bootstrap completed.") {
 		t.Fatalf("expected bootstrap completion output, got %q", out.String())
@@ -1199,7 +1205,8 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 			userHomeDir: func() (string, error) {
 				return home, nil
 			},
-			runSSH: ssh.Run,
+			runSSH:          ssh.Run,
+			generateHostKey: testGeneratePersonalServerHostKey,
 			sleep: func(context.Context, time.Duration) error {
 				return nil
 			},
@@ -1212,11 +1219,11 @@ func TestRunConfigureToleratesTemporarySSHDisconnectsDuringBootstrap(t *testing.
 	}
 
 	if got, want := ssh.calls, []personalServerSSHCall{
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "true"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "true"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "true"},
 		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
-		{identityFile: identity.PrivatePath, user: "root", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
+		{identityFile: identity.PrivatePath, user: "harish", host: "203.0.113.55", command: "cat /var/lib/myn/personal-server-bootstrap.json"},
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("SSH calls mismatch: want %#v, got %#v", want, got)
 	}
@@ -1301,11 +1308,14 @@ func TestRunConfigureReportsBootstrapFailureButKeepsSavedServer(t *testing.T) {
 		"Partial bootstrap failures:",
 		"- Codex install failed",
 		"SSH commands:",
-		"- root IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l root 203.0.113.55",
+		"- user IPv4: ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 -l harish 203.0.113.55",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected output to contain %q, got %q", want, output)
 		}
+	}
+	if strings.Contains(output, "-l root") {
+		t.Fatalf("bootstrap failure should not print root SSH commands, got %q", output)
 	}
 	if strings.Contains(output, "Mosh commands:") {
 		t.Fatalf("bootstrap failure should not print Mosh commands, got %q", output)
@@ -1531,7 +1541,7 @@ func TestRunConfigureCancellationAfterServerCreationKeepsSavedServer(t *testing.
 	}
 }
 
-func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *testing.T) {
+func TestRunConfigureSSHPollingRespectsCancellationAndKeepsSavedServer(t *testing.T) {
 	home := t.TempDir()
 	mkdirAll(t, filepath.Join(home, "projects"))
 	identity := seedTestSSHIdentity(t, home, ".ssh/id_ed25519", "existing@host", 0o600)
@@ -1591,7 +1601,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 		t.Fatalf("expected cancellation error, got %v", err)
 	}
 	if sshCalls != 1 {
-		t.Fatalf("expected one root SSH attempt before cancellation, got %d", sshCalls)
+		t.Fatalf("expected one SSH readiness attempt before cancellation, got %d", sshCalls)
 	}
 
 	cfg, err := loadAppConfig(configPath)
@@ -1599,7 +1609,7 @@ func TestRunConfigureRootSSHPollingRespectsCancellationAndKeepsSavedServer(t *te
 		t.Fatalf("load config: %v", err)
 	}
 	if got, want := cfg.PersonalServer, (personalServerConfig{ServerID: 654321, User: "harish", IPv4: "203.0.113.55", IPv6: "2001:db8::55"}); got != want {
-		t.Fatalf("root SSH cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
+		t.Fatalf("SSH polling cancellation should preserve Personal Server Configuration: want %#v, got %#v", want, got)
 	}
 }
 
@@ -1666,7 +1676,7 @@ func TestRunConfigureBootstrapMarkerPollingRespectsCancellationAndKeepsSavedServ
 		t.Fatalf("expected cancellation error, got %v", err)
 	}
 	if sshCalls != 2 {
-		t.Fatalf("expected root SSH and one marker poll before cancellation, got %d", sshCalls)
+		t.Fatalf("expected SSH readiness and one marker poll before cancellation, got %d", sshCalls)
 	}
 
 	cfg, err := loadAppConfig(configPath)

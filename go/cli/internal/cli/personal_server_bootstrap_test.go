@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,11 +11,15 @@ import (
 
 func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	const sshPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey personal@local"
+	const hostPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKey myn-personal-server-host"
+	const hostPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nhost-private-key-material\n-----END OPENSSH PRIVATE KEY-----\n"
 
 	rendered, err := renderPersonalServerBootstrapCloudInit(personalServerBootstrapInput{
 		User:              "harish",
 		PasswordHash:      "$6$abcdefghijklmnop$hashed",
 		SSHPublicKey:      sshPublicKey,
+		HostPublicKey:     hostPublicKey,
+		HostPrivateKey:    hostPrivateKey,
 		RemoteProjectRoot: "Remote Projects",
 		GitIdentity: personalServerGitIdentity{
 			Name: "Harish Subramanian",
@@ -35,16 +40,29 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 	if !parsed.PackageUpdate || !parsed.PackageUpgrade || !parsed.PackageRebootIfRequired {
 		t.Fatalf("security updates and reboot-on-required should be enabled, got %#v", parsed)
 	}
-	if parsed.DisableRoot {
-		t.Fatal("root SSH should remain enabled")
+	if !parsed.DisableRoot {
+		t.Fatal("root SSH should be disabled")
 	}
 	if parsed.SSHPwAuth {
 		t.Fatal("password SSH authentication should remain disabled")
 	}
+	if !parsed.SSHDeleteKeys {
+		t.Fatal("image host keys should be deleted in favor of the pinned host key")
+	}
+	if got, want := parsed.SSHGenKeyTypes, []string{"ed25519"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("host key generation types mismatch: want %v, got %v", want, got)
+	}
+	if got, want := parsed.SSHKeys["ed25519_private"], hostPrivateKey; got != want {
+		t.Fatalf("host private key mismatch: want %q, got %q", want, got)
+	}
+	if got, want := parsed.SSHKeys["ed25519_public"], hostPublicKey+"\n"; got != want {
+		t.Fatalf("host public key mismatch: want %q, got %q", want, got)
+	}
 
-	root := parsed.user("root")
-	if !containsString(root.SSHAuthorizedKeys, sshPublicKey) {
-		t.Fatalf("root should authorize configured SSH key, got %#v", root.SSHAuthorizedKeys)
+	for _, user := range parsed.Users {
+		if user.Name == "root" {
+			t.Fatalf("root should not be authorized for SSH, got %#v", user)
+		}
 	}
 
 	user := parsed.user("harish")
@@ -107,6 +125,7 @@ func TestRenderPersonalServerBootstrapCloudInit(t *testing.T) {
 		"ClientAliveInterval 300",
 		"sshd -t",
 		"systemctl reload ssh",
+		"rm -f /root/.ssh/authorized_keys",
 		"MYN_PARTIAL_FAILURES+=(\"Codex install failed\")",
 		"MYN_PARTIAL_FAILURES+=(\"Claude Code install failed\")",
 		"\"status\"",
@@ -198,6 +217,9 @@ type parsedBootstrapCloudInit struct {
 	PackageRebootIfRequired bool                 `yaml:"package_reboot_if_required"`
 	DisableRoot             bool                 `yaml:"disable_root"`
 	SSHPwAuth               bool                 `yaml:"ssh_pwauth"`
+	SSHDeleteKeys           bool                 `yaml:"ssh_deletekeys"`
+	SSHGenKeyTypes          []string             `yaml:"ssh_genkeytypes"`
+	SSHKeys                 map[string]string    `yaml:"ssh_keys"`
 	Users                   []bootstrapCloudUser `yaml:"users"`
 	WriteFiles              []bootstrapWriteFile `yaml:"write_files"`
 }

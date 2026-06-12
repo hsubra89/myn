@@ -26,3 +26,9 @@ func personalServerSSHCommandArgs(identityFile string, user string, host string,
 func personalServerSSHCommandText(identityFile string, user string, host string) string {
 	return fmt.Sprintf("ssh -o IdentitiesOnly=yes -i %s -l %s %s", identityFile, strings.TrimSpace(user), strings.TrimSpace(host))
 }
+
+// sshUserKnownHostsOption quotes the path in ssh configuration syntax so
+// directories with spaces (such as macOS "Application Support") work.
+func sshUserKnownHostsOption(path string) string {
+	return `UserKnownHostsFile="` + path + `"`
+}
